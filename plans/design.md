@@ -1,5 +1,7 @@
 # ArrIR: extraction contract
 
+Status: agreed direction; implementation proceeds in the small steps below.
+
 ## Purpose
 
 Extract the semantic IR that xrexpr developed to make its optimiser sound.
