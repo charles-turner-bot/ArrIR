@@ -10,6 +10,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+/// Replacement semantic core; see `docs/design.md` for the migration roadmap.
+/// The root-level types below remain the legacy scaffold, not conversion APIs.
+pub mod portable;
+
 /// The wire-format version emitted by [`Plan::new`].
 pub const WIRE_VERSION: u16 = 1;
 
