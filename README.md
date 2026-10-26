@@ -1,5 +1,10 @@
 # ArrIR
 
+> **Redesign in progress:** the current root API is an experimental scaffold.
+> Follow [the extraction contract and small-PR roadmap](docs/design.md) for the
+> replacement being developed from xrexpr's lowered semantic IR. The old feature
+> stack is not the agreed design; no compatibility guarantee is made yet.
+
 **ArrIR** is a small, portable intermediate representation for unary array-operation
 plans. It gives array libraries a common semantic core for operations such as selection,
 reduction and rechunking without requiring them to share a runtime, array engine, or API.
