@@ -103,7 +103,15 @@ impl Shape {
     }
 
     /// Return the number of logical elements, reporting multiplication overflow.
+    /// Empty dimensions make the count zero regardless of dimension order.
     pub fn element_count(&self) -> Result<u64, ValidationError> {
+        if self
+            .dimensions
+            .iter()
+            .any(|dimension| dimension.length == 0)
+        {
+            return Ok(0);
+        }
         self.dimensions.iter().try_fold(1_u64, |count, dimension| {
             count
                 .checked_mul(dimension.length)
@@ -311,7 +319,7 @@ pub enum OperationKind {
 /// This remains an open string: host libraries have valid reductions beyond a fixed shared
 /// list. An adapter decides whether it can emit a particular function.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(transparent)]
+#[serde(try_from = "String")]
 pub struct Reduction(String);
 
 impl Reduction {
@@ -333,12 +341,20 @@ impl Reduction {
     }
 }
 
+impl TryFrom<String> for Reduction {
+    type Error = ValidationError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::new(value)
+    }
+}
+
 /// A dimension identifier in portable plans.
 ///
 /// Host adapters may intern non-string host keys before lowering. Portable wire plans use
 /// strings so another language can decode them without carrying host runtime objects.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
+#[serde(try_from = "String")]
 pub struct DimId(String);
 
 impl DimId {
@@ -352,6 +368,14 @@ impl DimId {
 
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+}
+
+impl TryFrom<String> for DimId {
+    type Error = ValidationError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::new(value)
     }
 }
 

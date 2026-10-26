@@ -54,6 +54,32 @@ validation then detects operations that are incompatible with the shape availabl
 point in the plan. This separation lets adapters inspect a well-formed plan while reporting
 meaningful errors for unknown dimensions, invalid indexes, or incompatible reshapes.
 
+Deserialisation enforces the same dimension-identifier and reduction-name invariants as
+their Rust constructors. Other checks still require explicit validation: decoding JSON
+alone does **not** establish that a plan is valid. `Plan::new` checks structure only;
+call `validate()` before handing a plan to an adapter when full validation is needed.
+Run the example below with `cargo run --example shape_plan`.
+
+```rust
+use arrir::{DimId, Dimension, Operation, Plan, Shape};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let input = Shape::new(vec![
+        Dimension::new(DimId::new("time")?, 2),
+        Dimension::new(DimId::new("lat")?, 3),
+    ])?;
+    let plan = Plan::new(
+        input,
+        vec![Operation::Ravel {
+            dimension: DimId::new("sample")?,
+        }],
+    )?;
+    plan.validate()?;
+    assert_eq!(plan.infer_shape()?.dimensions[0].length, 6);
+    Ok(())
+}
+```
+
 `Transpose` names an exact output dimension permutation. `Reshape` names ordered output
 dimensions whose element count must match the input. `Ravel` flattens to one explicitly
 named dimension.
