@@ -158,6 +158,10 @@ pub enum Operation {
     Rechunk { chunks: BTreeMap<DimId, ChunkSpec> },
     /// Explicitly reorder every dimension of an array.
     Transpose { dimensions: Vec<DimId> },
+    /// Change logical shape while preserving the total element count.
+    Reshape { dimensions: Vec<Dimension> },
+    /// Flatten every dimension into one explicitly named dimension.
+    Ravel { dimension: DimId },
 }
 
 impl Operation {
@@ -168,6 +172,8 @@ impl Operation {
             Self::Select { .. } => OperationKind::Select,
             Self::Rechunk { .. } => OperationKind::Rechunk,
             Self::Transpose { .. } => OperationKind::Transpose,
+            Self::Reshape { .. } => OperationKind::Reshape,
+            Self::Ravel { .. } => OperationKind::Ravel,
         }
     }
 
@@ -186,7 +192,8 @@ impl Operation {
                 }
                 chunks.values().try_for_each(ChunkSpec::validate)
             }
-            Self::Transpose { .. } => Ok(()),
+            Self::Transpose { .. } | Self::Ravel { .. } => Ok(()),
+            Self::Reshape { dimensions } => Shape::new(dimensions.clone()).map(|_| ()),
         }
     }
 
@@ -258,6 +265,26 @@ impl Operation {
                 }
                 Ok(Shape { dimensions: output })
             }
+            Self::Reshape { dimensions } => {
+                let output_shape = Shape {
+                    dimensions: dimensions.clone(),
+                };
+                let input_count = shape_element_count(input_shape)?;
+                let output_count = shape_element_count(&output_shape)?;
+                if input_count != output_count {
+                    return Err(SemanticError::ElementCountMismatch {
+                        input: input_count,
+                        output: output_count,
+                    });
+                }
+                Ok(output_shape)
+            }
+            Self::Ravel { dimension } => Ok(Shape {
+                dimensions: vec![Dimension::new(
+                    dimension.clone(),
+                    shape_element_count(input_shape)?,
+                )],
+            }),
         }
     }
 }
@@ -270,6 +297,8 @@ pub enum OperationKind {
     Select,
     Rechunk,
     Transpose,
+    Reshape,
+    Ravel,
 }
 
 /// A host-independent reduction name.
@@ -503,6 +532,12 @@ fn normalize_negative_slice_bound(bound: Option<i64>, length: i128, default: i12
     }
 }
 
+fn shape_element_count(shape: &Shape) -> Result<u64, SemanticError> {
+    shape
+        .element_count()
+        .map_err(|_| SemanticError::ElementCountOverflow)
+}
+
 /// Portable scalar values supported by the first wire format.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(untagged)]
@@ -612,6 +647,10 @@ pub enum SemanticError {
     DuplicateTransposeDimension(String),
     #[error("transpose omits dimension {0:?}")]
     MissingTransposeDimension(String),
+    #[error("shape element count overflowed u64")]
+    ElementCountOverflow,
+    #[error("reshape changes element count from {input} to {output}")]
+    ElementCountMismatch { input: u64, output: u64 },
     #[error("slice steps must not be zero")]
     ZeroSliceStep,
     #[error("scalar positional index for dimension {dimension:?} must be an integer")]
@@ -1035,6 +1074,91 @@ mod tests {
         assert_eq!(
             unknown.infer_shape(&input),
             Err(SemanticError::UnknownDimension("lon".to_owned()))
+        );
+    }
+
+    #[test]
+    fn reshape_preserves_checked_element_count() {
+        let reshape = Operation::Reshape {
+            dimensions: vec![
+                Dimension::new(dim("row"), 3),
+                Dimension::new(dim("column"), 2),
+            ],
+        };
+        assert_eq!(
+            reshape.infer_shape(&shape(&[("time", 2), ("lat", 3)])),
+            Ok(shape(&[("row", 3), ("column", 2)]))
+        );
+
+        let mismatch = Operation::Reshape {
+            dimensions: vec![Dimension::new(dim("row"), 5)],
+        };
+        assert_eq!(
+            mismatch.infer_shape(&shape(&[("time", 2), ("lat", 3)])),
+            Err(SemanticError::ElementCountMismatch {
+                input: 6,
+                output: 5,
+            })
+        );
+    }
+
+    #[test]
+    fn reshape_allows_zero_element_shapes_but_rejects_duplicate_output_names() {
+        let zero_reshape = Operation::Reshape {
+            dimensions: vec![
+                Dimension::new(dim("row"), 0),
+                Dimension::new(dim("column"), 99),
+            ],
+        };
+        assert_eq!(
+            zero_reshape.infer_shape(&shape(&[("time", 0), ("lat", 2)])),
+            Ok(shape(&[("row", 0), ("column", 99)]))
+        );
+
+        assert_eq!(
+            Plan::new(
+                shape(&[("time", 2)]),
+                vec![Operation::Reshape {
+                    dimensions: vec![
+                        Dimension::new(dim("duplicate"), 1),
+                        Dimension::new(dim("duplicate"), 2),
+                    ],
+                }],
+            ),
+            Err(ValidationError::DuplicateShapeDimension(
+                "duplicate".to_owned()
+            ))
+        );
+    }
+
+    #[test]
+    fn reshape_and_ravel_detect_element_count_overflow() {
+        let overflowing_input = shape(&[("x", u64::MAX), ("y", 2)]);
+        let ravel = Operation::Ravel {
+            dimension: dim("flat"),
+        };
+        assert_eq!(
+            ravel.infer_shape(&overflowing_input),
+            Err(SemanticError::ElementCountOverflow)
+        );
+
+        let reshape = Operation::Reshape {
+            dimensions: vec![Dimension::new(dim("flat"), 1)],
+        };
+        assert_eq!(
+            reshape.infer_shape(&overflowing_input),
+            Err(SemanticError::ElementCountOverflow)
+        );
+    }
+
+    #[test]
+    fn ravel_creates_one_explicit_dimension() {
+        let ravel = Operation::Ravel {
+            dimension: dim("sample"),
+        };
+        assert_eq!(
+            ravel.infer_shape(&shape(&[("time", 2), ("lat", 3)])),
+            Ok(shape(&[("sample", 6)]))
         );
     }
 }
