@@ -156,6 +156,8 @@ pub enum Operation {
     Select { indexers: BTreeMap<DimId, Indexer> },
     /// A request to alter chunk topology without changing array values.
     Rechunk { chunks: BTreeMap<DimId, ChunkSpec> },
+    /// Explicitly reorder every dimension of an array.
+    Transpose { dimensions: Vec<DimId> },
 }
 
 impl Operation {
@@ -165,6 +167,7 @@ impl Operation {
             Self::Reduce { .. } => OperationKind::Reduce,
             Self::Select { .. } => OperationKind::Select,
             Self::Rechunk { .. } => OperationKind::Rechunk,
+            Self::Transpose { .. } => OperationKind::Transpose,
         }
     }
 
@@ -183,6 +186,7 @@ impl Operation {
                 }
                 chunks.values().try_for_each(ChunkSpec::validate)
             }
+            Self::Transpose { .. } => Ok(()),
         }
     }
 
@@ -234,6 +238,26 @@ impl Operation {
                 }
                 Ok(input_shape.clone())
             }
+            Self::Transpose { dimensions } => {
+                let mut seen = BTreeSet::new();
+                let mut output = Vec::with_capacity(dimensions.len());
+                for name in dimensions {
+                    if !seen.insert(name.clone()) {
+                        return Err(SemanticError::DuplicateTransposeDimension(
+                            name.as_str().to_owned(),
+                        ));
+                    }
+                    output.push(input_shape.dimension(name)?.clone());
+                }
+                for dimension in &input_shape.dimensions {
+                    if !seen.contains(&dimension.name) {
+                        return Err(SemanticError::MissingTransposeDimension(
+                            dimension.name.as_str().to_owned(),
+                        ));
+                    }
+                }
+                Ok(Shape { dimensions: output })
+            }
         }
     }
 }
@@ -245,6 +269,7 @@ pub enum OperationKind {
     Reduce,
     Select,
     Rechunk,
+    Transpose,
 }
 
 /// A host-independent reduction name.
@@ -583,6 +608,10 @@ pub enum ValidationError {
 pub enum SemanticError {
     #[error("operation references unknown dimension {0:?}")]
     UnknownDimension(String),
+    #[error("transpose lists dimension {0:?} more than once")]
+    DuplicateTransposeDimension(String),
+    #[error("transpose omits dimension {0:?}")]
+    MissingTransposeDimension(String),
     #[error("slice steps must not be zero")]
     ZeroSliceStep,
     #[error("scalar positional index for dimension {dimension:?} must be an integer")]
@@ -965,6 +994,47 @@ mod tests {
                 expected: 3,
                 actual: 2,
             })
+        );
+    }
+
+    #[test]
+    fn transpose_reorders_dimensions_without_changing_lengths() {
+        let transpose = Operation::Transpose {
+            dimensions: vec![dim("lon"), dim("time"), dim("lat")],
+        };
+        assert_eq!(
+            transpose.infer_shape(&shape(&[("time", 0), ("lat", 2), ("lon", 3)])),
+            Ok(shape(&[("lon", 3), ("time", 0), ("lat", 2)]))
+        );
+    }
+
+    #[test]
+    fn transpose_requires_an_exact_dimension_permutation() {
+        let input = shape(&[("time", 2), ("lat", 3)]);
+        let duplicate = Operation::Transpose {
+            dimensions: vec![dim("time"), dim("time")],
+        };
+        assert_eq!(
+            duplicate.infer_shape(&input),
+            Err(SemanticError::DuplicateTransposeDimension(
+                "time".to_owned()
+            ))
+        );
+
+        let missing = Operation::Transpose {
+            dimensions: vec![dim("time")],
+        };
+        assert_eq!(
+            missing.infer_shape(&input),
+            Err(SemanticError::MissingTransposeDimension("lat".to_owned()))
+        );
+
+        let unknown = Operation::Transpose {
+            dimensions: vec![dim("time"), dim("lon")],
+        };
+        assert_eq!(
+            unknown.infer_shape(&input),
+            Err(SemanticError::UnknownDimension("lon".to_owned()))
         );
     }
 }
