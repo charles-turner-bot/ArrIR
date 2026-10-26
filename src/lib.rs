@@ -4,6 +4,11 @@
 //! [`Plan`]. Another adapter either emits an equivalent target plan or reports that it
 //! cannot support one of the operations. The core never stores host runtime objects and
 //! never touches array data.
+//!
+//! Plans retain an ordered input shape only. Shape inference propagates that shape through
+//! the operation sequence; intermediate and output shapes are never serialised. Structural
+//! validation checks wire-level well-formedness, while semantic validation checks that each
+//! operation is compatible with the shape preceding it.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -711,25 +716,33 @@ mod tests {
     #[test]
     fn round_trips_a_portable_plan_through_json() {
         let plan = Plan::new(
-            shape(&[("time", 10), ("lat", 2)]),
+            shape(&[("time", 2), ("lat", 3)]),
             vec![
+                Operation::Transpose {
+                    dimensions: vec![dim("lat"), dim("time")],
+                },
                 Operation::Select {
                     indexers: BTreeMap::from([(
                         dim("time"),
-                        Indexer::Slice {
-                            start: Some(0),
-                            stop: Some(10),
-                            step: None,
-                        },
+                        Indexer::Positions { values: vec![1, 1] },
                     )]),
+                },
+                Operation::Rechunk {
+                    chunks: BTreeMap::from([(dim("lat"), ChunkSpec::Blocks { sizes: vec![3] })]),
                 },
                 Operation::Reduce {
                     function: Reduction::new("mean").unwrap(),
                     dimensions: DimSet::Named(BTreeSet::from([dim("lat")])),
                     keep_dimensions: false,
                 },
-                Operation::Rechunk {
-                    chunks: BTreeMap::from([(dim("time"), ChunkSpec::Size { size: 100 })]),
+                Operation::Ravel {
+                    dimension: dim("sample"),
+                },
+                Operation::Reshape {
+                    dimensions: vec![
+                        Dimension::new(dim("row"), 1),
+                        Dimension::new(dim("column"), 2),
+                    ],
                 },
             ],
         )

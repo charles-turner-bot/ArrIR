@@ -22,8 +22,9 @@ The first release contains:
   from the operation sequence rather than serialised;
 - `Reduce` with symbolic or named dimension sets;
 - `Select` with scalar, slice, positional and mask indexers;
+- `Transpose`, `Reshape`, and `Ravel` as explicit logical shape operations;
 - `Rechunk` with typed chunk specifications;
-- a stable serde wire representation and validation; and
+- a serde wire representation plus structural and semantic validation; and
 - `LowerToArrIr` / `EmitFromArrIr` traits for host-specific adapters.
 
 An adapter must either emit an equivalent target operation or return an error. It must not
@@ -40,6 +41,29 @@ Slice semantics are a cross-language contract: stop is exclusive, negative bound
 from the end, omitted bounds are clamped as in Python, and non-zero negative steps reverse
 the selection. Empty slices are valid. Positional arrays preserve order and may repeat a
 position.
+
+## Shapes and validation
+
+`Plan` stores the ordered input shape only. It does not cache intermediate or output shapes:
+`infer_shape()` propagates the input through the linear operation sequence. Shapes may be
+zero-dimensional, and individual dimensions may have length zero. All element-count
+transformations use checked arithmetic.
+
+Structural validation checks the wire form without reference to a particular shape. Semantic
+validation then detects operations that are incompatible with the shape available at their
+point in the plan. This separation lets adapters inspect a well-formed plan while reporting
+meaningful errors for unknown dimensions, invalid indexes, or incompatible reshapes.
+
+`Transpose` names an exact output dimension permutation. `Reshape` names ordered output
+dimensions whose element count must match the input. `Ravel` flattens to one explicitly
+named dimension.
+
+## Rechunking
+
+`Rechunk` is retained because existing adapters have a useful common vocabulary for chunk
+requests. Its exact placement is deliberately unresolved: it lies near the boundary between
+logical array transformations and physical planning. ArrIR validates its shape compatibility
+but does not prescribe chunk execution or materialisation strategy.
 
 ## Portable versus host-specific operations
 
@@ -63,17 +87,15 @@ cargo clippy --all-targets -- -D warnings
 
 The work is intentionally divided into reviewable bites:
 
-1. **Core vocabulary (this repository state):** portable symbols, `DimSet`, selections,
-   reductions, rechunking, serde and validation.
-2. **Operation effects:** pure metadata such as consumed, preserved and resized dimensions;
-   enough to validate and reason about a plan without array data.
-3. **Rewrite kernel:** local, semantics-preserving selection/project/rechunk rewrites over
+1. **Shape-aware core (this repository state):** portable symbols, ordered shapes, pure
+   inference, selection, reductions, rechunking, and explicit shape operations.
+2. **Rewrite kernel:** local, semantics-preserving selection/project/rechunk rewrites over
    the portable operations.
-4. **Contextual reductions:** explicitly model grouped, windowed and weighted reductions;
+3. **Contextual reductions:** explicitly model grouped, windowed and weighted reductions;
    no generic `args` bag or host callback escape hatch.
-5. **Adapters:** start with xrexpr/PyO3, then prove a second host implementation (for
+4. **Adapters:** start with xrexpr/PyO3, then prove a second host implementation (for
    example JavaScript/WASM) against shared round-trip fixtures.
-6. **Binary operations and schemas:** only after a concrete `merge`/`where`-style use case
+5. **Binary operations and schemas:** only after a concrete `merge`/`where`-style use case
    earns the move from a linear list to a graph or tree.
 
 The sequencing is important: a host adapter should consume a stable operation algebra, not
