@@ -35,12 +35,12 @@ impl Plan {
             input_shape,
             operations,
         };
-        plan.validate()?;
+        plan.validate_structure()?;
         Ok(plan)
     }
 
-    /// Ensure this is a currently supported, internally valid plan.
-    pub fn validate(&self) -> Result<(), ValidationError> {
+    /// Ensure this is a currently supported, structurally valid plan.
+    pub fn validate_structure(&self) -> Result<(), ValidationError> {
         if self.version != WIRE_VERSION {
             return Err(ValidationError::UnsupportedWireVersion(self.version));
         }
@@ -48,6 +48,27 @@ impl Plan {
         for operation in &self.operations {
             operation.validate()?;
         }
+        Ok(())
+    }
+
+    /// Infer the final logical shape by applying every operation in sequence.
+    pub fn infer_shape(&self) -> Result<Shape, SemanticError> {
+        self.operations
+            .iter()
+            .try_fold(self.input_shape.clone(), |shape, operation| {
+                operation.infer_shape(&shape)
+            })
+    }
+
+    /// Verify that every operation is compatible with the preceding shape.
+    pub fn validate_semantics(&self) -> Result<(), SemanticError> {
+        self.infer_shape().map(|_| ())
+    }
+
+    /// Validate both the wire structure and shape-dependent operation semantics.
+    pub fn validate(&self) -> Result<(), PlanValidationError> {
+        self.validate_structure()?;
+        self.validate_semantics()?;
         Ok(())
     }
 }
@@ -95,6 +116,13 @@ impl Shape {
             }
         }
         Ok(())
+    }
+
+    fn dimension(&self, name: &DimId) -> Result<&Dimension, SemanticError> {
+        self.dimensions
+            .iter()
+            .find(|dimension| &dimension.name == name)
+            .ok_or_else(|| SemanticError::UnknownDimension(name.as_str().to_owned()))
     }
 }
 
@@ -154,6 +182,55 @@ impl Operation {
                     return Err(ValidationError::EmptyRechunk);
                 }
                 chunks.values().try_for_each(ChunkSpec::validate)
+            }
+        }
+    }
+
+    /// Infer the output shape produced by this operation on `input_shape`.
+    pub fn infer_shape(&self, input_shape: &Shape) -> Result<Shape, SemanticError> {
+        match self {
+            Self::Reduce {
+                dimensions,
+                keep_dimensions,
+                ..
+            } => {
+                let reduced = dimensions.resolve(input_shape)?;
+                let dimensions = input_shape
+                    .dimensions
+                    .iter()
+                    .filter_map(|dimension| {
+                        if reduced.contains(&dimension.name) {
+                            keep_dimensions.then(|| Dimension::new(dimension.name.clone(), 1))
+                        } else {
+                            Some(dimension.clone())
+                        }
+                    })
+                    .collect();
+                Ok(Shape { dimensions })
+            }
+            Self::Select { indexers, .. } => {
+                for dimension in indexers.keys() {
+                    input_shape.dimension(dimension)?;
+                }
+                Ok(Shape {
+                    dimensions: input_shape
+                        .dimensions
+                        .iter()
+                        .filter(|dimension| {
+                            !indexers
+                                .get(&dimension.name)
+                                .is_some_and(Indexer::drops_dimension)
+                        })
+                        .cloned()
+                        .collect(),
+                })
+            }
+            Self::Rechunk { chunks } => {
+                for (name, specification) in chunks {
+                    let dimension = input_shape.dimension(name)?;
+                    specification.validate_for_dimension(dimension)?;
+                }
+                Ok(input_shape.clone())
             }
         }
     }
@@ -225,6 +302,24 @@ pub enum DimSet {
     All,
     /// A concrete, deterministic set of dimensions.
     Named(BTreeSet<DimId>),
+}
+
+impl DimSet {
+    fn resolve(&self, shape: &Shape) -> Result<BTreeSet<DimId>, SemanticError> {
+        match self {
+            Self::All => Ok(shape
+                .dimensions
+                .iter()
+                .map(|dimension| dimension.name.clone())
+                .collect()),
+            Self::Named(dimensions) => {
+                for dimension in dimensions {
+                    shape.dimension(dimension)?;
+                }
+                Ok(dimensions.clone())
+            }
+        }
+    }
 }
 
 /// Whether selections are positional (`isel`) or coordinate/label based (`sel`).
@@ -303,10 +398,29 @@ impl ChunkSpec {
             Self::ByteSize { value } if value.trim().is_empty() => {
                 Err(ValidationError::EmptyByteSize)
             }
-            Self::Blocks { sizes } if sizes.is_empty() => Err(ValidationError::EmptyChunkBlocks),
             Self::Blocks { sizes } if sizes.contains(&0) => Err(ValidationError::ZeroChunkSize),
             _ => Ok(()),
         }
+    }
+
+    fn validate_for_dimension(&self, dimension: &Dimension) -> Result<(), SemanticError> {
+        if let Self::Blocks { sizes } = self {
+            let total = sizes.iter().try_fold(0_u64, |total, size| {
+                total
+                    .checked_add(*size)
+                    .ok_or_else(|| SemanticError::ChunkBlockTotalOverflow {
+                        dimension: dimension.name.as_str().to_owned(),
+                    })
+            })?;
+            if total != dimension.length {
+                return Err(SemanticError::ChunkBlockLengthMismatch {
+                    dimension: dimension.name.as_str().to_owned(),
+                    expected: dimension.length,
+                    actual: total,
+                });
+            }
+        }
+        Ok(())
     }
 }
 
@@ -325,7 +439,7 @@ pub trait EmitFromArrIr: Sized {
     fn emit_from_arrir(plan: &Plan) -> Result<Self, Self::Error>;
 }
 
-/// Construction or validation failures in the portable core.
+/// Shape-independent construction and structural validation failures.
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 pub enum ValidationError {
     #[error("unsupported ArrIR wire version {0}")]
@@ -348,8 +462,32 @@ pub enum ValidationError {
     ZeroChunkSize,
     #[error("byte-size chunk specifications must not be empty")]
     EmptyByteSize,
-    #[error("explicit chunk specifications need at least one block")]
-    EmptyChunkBlocks,
+}
+
+/// Shape-dependent operation validation failures.
+#[derive(Clone, Debug, Error, PartialEq, Eq)]
+pub enum SemanticError {
+    #[error("operation references unknown dimension {0:?}")]
+    UnknownDimension(String),
+    #[error("chunk blocks for dimension {dimension:?} overflowed u64")]
+    ChunkBlockTotalOverflow { dimension: String },
+    #[error(
+        "chunk blocks for dimension {dimension:?} total {actual}, expected exactly {expected}"
+    )]
+    ChunkBlockLengthMismatch {
+        dimension: String,
+        expected: u64,
+        actual: u64,
+    },
+}
+
+/// A failure from either structural or shape-dependent plan validation.
+#[derive(Clone, Debug, Error, PartialEq, Eq)]
+pub enum PlanValidationError {
+    #[error(transparent)]
+    Structural(#[from] ValidationError),
+    #[error(transparent)]
+    Semantic(#[from] SemanticError),
 }
 
 #[cfg(test)]
@@ -474,6 +612,99 @@ mod tests {
         assert_eq!(
             shape.element_count(),
             Err(ValidationError::ElementCountOverflow)
+        );
+    }
+
+    #[test]
+    fn propagates_shapes_through_existing_operations() {
+        let plan = Plan::new(
+            shape(&[("time", 6), ("lat", 2)]),
+            vec![
+                Operation::Rechunk {
+                    chunks: BTreeMap::from([(
+                        dim("time"),
+                        ChunkSpec::Blocks { sizes: vec![2, 4] },
+                    )]),
+                },
+                Operation::Reduce {
+                    function: Reduction::new("mean").unwrap(),
+                    dimensions: DimSet::Named(BTreeSet::from([dim("lat")])),
+                    keep_dimensions: false,
+                },
+            ],
+        )
+        .unwrap();
+
+        assert_eq!(plan.infer_shape(), Ok(shape(&[("time", 6)])));
+        plan.validate_semantics().unwrap();
+    }
+
+    #[test]
+    fn keeps_structural_and_semantic_validation_separate() {
+        let plan = Plan::new(
+            shape(&[("time", 6)]),
+            vec![Operation::Reduce {
+                function: Reduction::new("mean").unwrap(),
+                dimensions: DimSet::Named(BTreeSet::from([dim("lat")])),
+                keep_dimensions: false,
+            }],
+        )
+        .unwrap();
+
+        assert_eq!(
+            plan.validate_semantics(),
+            Err(SemanticError::UnknownDimension("lat".to_owned()))
+        );
+        assert_eq!(
+            plan.validate(),
+            Err(PlanValidationError::Semantic(
+                SemanticError::UnknownDimension("lat".to_owned())
+            ))
+        );
+    }
+
+    #[test]
+    fn reduction_can_produce_a_scalar_or_keep_reduced_dimensions() {
+        let input = shape(&[("time", 6), ("lat", 2)]);
+        let scalar = Operation::Reduce {
+            function: Reduction::new("sum").unwrap(),
+            dimensions: DimSet::All,
+            keep_dimensions: false,
+        };
+        assert_eq!(scalar.infer_shape(&input), Ok(Shape::scalar()));
+
+        let kept = Operation::Reduce {
+            function: Reduction::new("sum").unwrap(),
+            dimensions: DimSet::All,
+            keep_dimensions: true,
+        };
+        assert_eq!(
+            kept.infer_shape(&input),
+            Ok(shape(&[("time", 1), ("lat", 1)]))
+        );
+    }
+
+    #[test]
+    fn validates_rechunk_blocks_against_the_current_shape() {
+        let input = shape(&[("time", 6)]);
+        let mismatch = Operation::Rechunk {
+            chunks: BTreeMap::from([(dim("time"), ChunkSpec::Blocks { sizes: vec![2, 3] })]),
+        };
+        assert_eq!(
+            mismatch.infer_shape(&input),
+            Err(SemanticError::ChunkBlockLengthMismatch {
+                dimension: "time".to_owned(),
+                expected: 6,
+                actual: 5,
+            })
+        );
+
+        let empty_blocks_for_empty_dimension = Operation::Rechunk {
+            chunks: BTreeMap::from([(dim("time"), ChunkSpec::Blocks { sizes: vec![] })]),
+        };
+        assert_eq!(
+            empty_blocks_for_empty_dimension.infer_shape(&shape(&[("time", 0)])),
+            Ok(shape(&[("time", 0)]))
         );
     }
 }
