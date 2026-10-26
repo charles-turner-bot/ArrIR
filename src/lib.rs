@@ -18,15 +18,21 @@ pub const WIRE_VERSION: u16 = 1;
 pub struct Plan {
     /// Version of this serialisable representation.
     pub version: u16,
+    /// Ordered logical dimensions of the array entering this plan.
+    ///
+    /// ArrIR stores only this input shape. Output shapes are derived by propagating it
+    /// through [`Plan::operations`], rather than cached in the wire representation.
+    pub input_shape: Shape,
     /// Operations run from input to result.
     pub operations: Vec<Operation>,
 }
 
 impl Plan {
     /// Create a plan using the current wire format.
-    pub fn new(operations: Vec<Operation>) -> Result<Self, ValidationError> {
+    pub fn new(input_shape: Shape, operations: Vec<Operation>) -> Result<Self, ValidationError> {
         let plan = Self {
             version: WIRE_VERSION,
+            input_shape,
             operations,
         };
         plan.validate()?;
@@ -38,10 +44,70 @@ impl Plan {
         if self.version != WIRE_VERSION {
             return Err(ValidationError::UnsupportedWireVersion(self.version));
         }
+        self.input_shape.validate()?;
         for operation in &self.operations {
             operation.validate()?;
         }
         Ok(())
+    }
+}
+
+/// An ordered, named logical array shape.
+///
+/// A shape may be zero-dimensional and its dimensions may have length zero. Dimension
+/// ordering is significant and is preserved in the serialised representation.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Shape {
+    pub dimensions: Vec<Dimension>,
+}
+
+impl Shape {
+    /// Construct a shape with unique dimension names.
+    pub fn new(dimensions: Vec<Dimension>) -> Result<Self, ValidationError> {
+        let shape = Self { dimensions };
+        shape.validate()?;
+        Ok(shape)
+    }
+
+    /// Construct a zero-dimensional scalar shape.
+    pub fn scalar() -> Self {
+        Self {
+            dimensions: Vec::new(),
+        }
+    }
+
+    /// Return the number of logical elements, reporting multiplication overflow.
+    pub fn element_count(&self) -> Result<u64, ValidationError> {
+        self.dimensions.iter().try_fold(1_u64, |count, dimension| {
+            count
+                .checked_mul(dimension.length)
+                .ok_or(ValidationError::ElementCountOverflow)
+        })
+    }
+
+    fn validate(&self) -> Result<(), ValidationError> {
+        let mut names = BTreeSet::new();
+        for dimension in &self.dimensions {
+            if !names.insert(dimension.name.clone()) {
+                return Err(ValidationError::DuplicateShapeDimension(
+                    dimension.name.as_str().to_owned(),
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// One named dimension in an ordered [`Shape`].
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Dimension {
+    pub name: DimId,
+    pub length: u64,
+}
+
+impl Dimension {
+    pub fn new(name: DimId, length: u64) -> Self {
+        Self { name, length }
     }
 }
 
@@ -266,6 +332,10 @@ pub enum ValidationError {
     UnsupportedWireVersion(u16),
     #[error("dimension identifiers must not be empty")]
     EmptyDimension,
+    #[error("shape contains duplicate dimension {0:?}")]
+    DuplicateShapeDimension(String),
+    #[error("shape element count overflowed u64")]
+    ElementCountOverflow,
     #[error("reduction names must not be empty")]
     EmptyReduction,
     #[error("a selection needs at least one indexer")]
@@ -290,29 +360,42 @@ mod tests {
         DimId::new(value).unwrap()
     }
 
+    fn shape(dimensions: &[(&str, u64)]) -> Shape {
+        Shape::new(
+            dimensions
+                .iter()
+                .map(|(name, length)| Dimension::new(dim(name), *length))
+                .collect(),
+        )
+        .unwrap()
+    }
+
     #[test]
     fn round_trips_a_portable_plan_through_json() {
-        let plan = Plan::new(vec![
-            Operation::Select {
-                mode: SelectionMode::Position,
-                indexers: BTreeMap::from([(
-                    dim("time"),
-                    Indexer::Slice {
-                        start: Some(0),
-                        stop: Some(10),
-                        step: None,
-                    },
-                )]),
-            },
-            Operation::Reduce {
-                function: Reduction::new("mean").unwrap(),
-                dimensions: DimSet::Named(BTreeSet::from([dim("lat")])),
-                keep_dimensions: false,
-            },
-            Operation::Rechunk {
-                chunks: BTreeMap::from([(dim("time"), ChunkSpec::Size { size: 100 })]),
-            },
-        ])
+        let plan = Plan::new(
+            shape(&[("time", 10), ("lat", 2)]),
+            vec![
+                Operation::Select {
+                    mode: SelectionMode::Position,
+                    indexers: BTreeMap::from([(
+                        dim("time"),
+                        Indexer::Slice {
+                            start: Some(0),
+                            stop: Some(10),
+                            step: None,
+                        },
+                    )]),
+                },
+                Operation::Reduce {
+                    function: Reduction::new("mean").unwrap(),
+                    dimensions: DimSet::Named(BTreeSet::from([dim("lat")])),
+                    keep_dimensions: false,
+                },
+                Operation::Rechunk {
+                    chunks: BTreeMap::from([(dim("time"), ChunkSpec::Size { size: 100 })]),
+                },
+            ],
+        )
         .unwrap();
 
         let encoded = serde_json::to_string(&plan).unwrap();
@@ -325,14 +408,20 @@ mod tests {
     fn rejects_invalid_structural_values() {
         assert_eq!(DimId::new(""), Err(ValidationError::EmptyDimension));
         assert_eq!(Reduction::new("  "), Err(ValidationError::EmptyReduction));
-        assert!(Plan::new(vec![Operation::Select {
-            mode: SelectionMode::Position,
-            indexers: BTreeMap::new(),
-        }])
+        assert!(Plan::new(
+            shape(&[]),
+            vec![Operation::Select {
+                mode: SelectionMode::Position,
+                indexers: BTreeMap::new(),
+            }]
+        )
         .is_err());
-        assert!(Plan::new(vec![Operation::Rechunk {
-            chunks: BTreeMap::from([(dim("time"), ChunkSpec::Size { size: 0 })]),
-        }])
+        assert!(Plan::new(
+            shape(&[]),
+            vec![Operation::Rechunk {
+                chunks: BTreeMap::from([(dim("time"), ChunkSpec::Size { size: 0 })]),
+            }]
+        )
         .is_err());
     }
 
@@ -343,5 +432,48 @@ mod tests {
         }
         .drops_dimension());
         assert!(!Indexer::Positions { values: vec![0] }.drops_dimension());
+    }
+
+    #[test]
+    fn preserves_shape_order_and_zero_lengths() {
+        let shape = shape(&[("time", 0), ("lat", 2)]);
+        assert_eq!(shape.dimensions[0].name.as_str(), "time");
+        assert_eq!(shape.dimensions[1].name.as_str(), "lat");
+        assert_eq!(shape.element_count(), Ok(0));
+
+        let plan = Plan::new(shape.clone(), vec![]).unwrap();
+        let encoded = serde_json::to_string(&plan).unwrap();
+        let decoded: Plan = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(decoded.input_shape, shape);
+    }
+
+    #[test]
+    fn accepts_zero_dimensional_shapes() {
+        let scalar = Shape::scalar();
+        assert_eq!(scalar.element_count(), Ok(1));
+        Plan::new(scalar, vec![]).unwrap();
+    }
+
+    #[test]
+    fn rejects_duplicate_shape_dimensions() {
+        let duplicate = Shape {
+            dimensions: vec![
+                Dimension::new(dim("time"), 1),
+                Dimension::new(dim("time"), 2),
+            ],
+        };
+        assert_eq!(
+            duplicate.validate(),
+            Err(ValidationError::DuplicateShapeDimension("time".to_owned()))
+        );
+    }
+
+    #[test]
+    fn detects_element_count_overflow() {
+        let shape = shape(&[("x", u64::MAX), ("y", 2)]);
+        assert_eq!(
+            shape.element_count(),
+            Err(ValidationError::ElementCountOverflow)
+        );
     }
 }

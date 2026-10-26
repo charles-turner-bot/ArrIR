@@ -18,6 +18,8 @@ not depend on Python, JavaScript, xarray, Dask, Polars, Arrow, or an execution e
 
 The first release contains:
 
+- an explicit ordered input shape of named `u64` dimensions; output shapes are derived
+  from the operation sequence rather than serialised;
 - `Reduce` with symbolic or named dimension sets;
 - `Select` with scalar, slice, positional and mask indexers;
 - `Rechunk` with typed chunk specifications;
