@@ -29,6 +29,18 @@ The first release contains:
 An adapter must either emit an equivalent target operation or return an error. It must not
 silently approximate, erase, or execute an ArrIR operation.
 
+## Positional selection
+
+ArrIR selection is positional only. A lowering adapter resolves coordinate labels in its
+host library before constructing an ArrIR plan. The core supports independent scalar,
+slice, positional-array, and boolean-mask indexers, with at most one indexer per named
+dimension; it does not model coupled advanced-index broadcasting.
+
+Slice semantics are a cross-language contract: stop is exclusive, negative bounds count
+from the end, omitted bounds are clamped as in Python, and non-zero negative steps reverse
+the selection. Empty slices are valid. Positional arrays preserve order and may repeat a
+position.
+
 ## Portable versus host-specific operations
 
 Not every operation is portable. A weighted xarray reduction that carries a live Python

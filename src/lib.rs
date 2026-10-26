@@ -149,11 +149,11 @@ pub enum Operation {
         dimensions: DimSet,
         keep_dimensions: bool,
     },
-    /// Positional or label-like selection of one or more dimensions.
-    Select {
-        mode: SelectionMode,
-        indexers: BTreeMap<DimId, Indexer>,
-    },
+    /// Positional selection of one or more dimensions.
+    ///
+    /// Coordinate labels must be resolved by a lowering adapter before constructing
+    /// this portable operation.
+    Select { indexers: BTreeMap<DimId, Indexer> },
     /// A request to alter chunk topology without changing array values.
     Rechunk { chunks: BTreeMap<DimId, ChunkSpec> },
 }
@@ -171,7 +171,7 @@ impl Operation {
     fn validate(&self) -> Result<(), ValidationError> {
         match self {
             Self::Reduce { function, .. } => function.validate(),
-            Self::Select { indexers, .. } => {
+            Self::Select { indexers } => {
                 if indexers.is_empty() {
                     return Err(ValidationError::EmptySelection);
                 }
@@ -208,22 +208,24 @@ impl Operation {
                     .collect();
                 Ok(Shape { dimensions })
             }
-            Self::Select { indexers, .. } => {
+            Self::Select { indexers } => {
                 for dimension in indexers.keys() {
                     input_shape.dimension(dimension)?;
                 }
-                Ok(Shape {
-                    dimensions: input_shape
-                        .dimensions
-                        .iter()
-                        .filter(|dimension| {
-                            !indexers
-                                .get(&dimension.name)
-                                .is_some_and(Indexer::drops_dimension)
-                        })
-                        .cloned()
-                        .collect(),
-                })
+                let mut dimensions = Vec::new();
+                for dimension in &input_shape.dimensions {
+                    match indexers.get(&dimension.name) {
+                        None => dimensions.push(dimension.clone()),
+                        Some(indexer) if indexer.drops_dimension() => {
+                            indexer.validate_for_dimension(dimension)?;
+                        }
+                        Some(indexer) => dimensions.push(Dimension::new(
+                            dimension.name.clone(),
+                            indexer.output_length(dimension)?,
+                        )),
+                    }
+                }
+                Ok(Shape { dimensions })
             }
             Self::Rechunk { chunks } => {
                 for (name, specification) in chunks {
@@ -322,15 +324,12 @@ impl DimSet {
     }
 }
 
-/// Whether selections are positional (`isel`) or coordinate/label based (`sel`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SelectionMode {
-    Position,
-    Label,
-}
-
-/// One selection value. The variants describe values the core can reason about without data.
+/// One positional selection value.
+///
+/// Slice semantics follow Python: stop is exclusive; negative bounds count from the end;
+/// omitted bounds clamp normally; a negative step reverses; and empty slices are valid.
+/// This deliberately models independent one-dimensional indexers only, not NumPy coupled
+/// advanced-index broadcasting.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Indexer {
@@ -361,6 +360,121 @@ impl Indexer {
             return Err(ValidationError::ZeroSliceStep);
         }
         Ok(())
+    }
+
+    fn validate_for_dimension(&self, dimension: &Dimension) -> Result<(), SemanticError> {
+        match self {
+            Self::Scalar {
+                value: Literal::Integer(index),
+            } => {
+                normalize_index(*index, dimension)?;
+            }
+            Self::Scalar { .. } => {
+                return Err(SemanticError::NonIntegerPosition {
+                    dimension: dimension.name.as_str().to_owned(),
+                });
+            }
+            Self::Positions { values } => {
+                for index in values {
+                    normalize_index(*index, dimension)?;
+                }
+            }
+            Self::Mask { values } => {
+                let actual = u64::try_from(values.len()).expect("usize fits in u64");
+                if actual != dimension.length {
+                    return Err(SemanticError::MaskLengthMismatch {
+                        dimension: dimension.name.as_str().to_owned(),
+                        expected: dimension.length,
+                        actual,
+                    });
+                }
+            }
+            Self::Slice { .. } => {}
+        }
+        Ok(())
+    }
+
+    fn output_length(&self, dimension: &Dimension) -> Result<u64, SemanticError> {
+        self.validate_for_dimension(dimension)?;
+        match self {
+            Self::Scalar { .. } => unreachable!("scalars remove their dimension"),
+            Self::Slice { start, stop, step } => slice_length(*start, *stop, *step, dimension),
+            Self::Positions { values } => {
+                Ok(u64::try_from(values.len()).expect("usize fits in u64"))
+            }
+            Self::Mask { values } => {
+                Ok(u64::try_from(values.iter().filter(|value| **value).count())
+                    .expect("usize fits in u64"))
+            }
+        }
+    }
+}
+
+fn normalize_index(index: i64, dimension: &Dimension) -> Result<u64, SemanticError> {
+    let length = i128::from(dimension.length);
+    let normalized = if index < 0 {
+        i128::from(index) + length
+    } else {
+        i128::from(index)
+    };
+    if !(0..length).contains(&normalized) {
+        return Err(SemanticError::IndexOutOfBounds {
+            dimension: dimension.name.as_str().to_owned(),
+            index,
+            length: dimension.length,
+        });
+    }
+    Ok(u64::try_from(normalized).expect("validated non-negative index fits in u64"))
+}
+
+fn slice_length(
+    start: Option<i64>,
+    stop: Option<i64>,
+    step: Option<i64>,
+    dimension: &Dimension,
+) -> Result<u64, SemanticError> {
+    let length = i128::from(dimension.length);
+    let step = i128::from(step.unwrap_or(1));
+    if step == 0 {
+        return Err(SemanticError::ZeroSliceStep);
+    }
+
+    let output_length = if step > 0 {
+        let start = normalize_positive_slice_bound(start, length, 0);
+        let stop = normalize_positive_slice_bound(stop, length, length);
+        if stop <= start {
+            0
+        } else {
+            1 + (stop - start - 1) / step
+        }
+    } else {
+        let start = normalize_negative_slice_bound(start, length, length - 1);
+        let stop = normalize_negative_slice_bound(stop, length, -1);
+        if start <= stop {
+            0
+        } else {
+            1 + (start - stop - 1) / -step
+        }
+    };
+    u64::try_from(output_length).map_err(|_| SemanticError::SliceLengthOverflow {
+        dimension: dimension.name.as_str().to_owned(),
+    })
+}
+
+fn normalize_positive_slice_bound(bound: Option<i64>, length: i128, default: i128) -> i128 {
+    let bound = bound.map_or(default, i128::from);
+    let bound = if bound < 0 { bound + length } else { bound };
+    bound.clamp(0, length)
+}
+
+fn normalize_negative_slice_bound(bound: Option<i64>, length: i128, default: i128) -> i128 {
+    match bound {
+        None => default,
+        Some(bound) => {
+            let bound = i128::from(bound);
+            let bound = if bound < 0 { bound + length } else { bound };
+            bound.clamp(-1, length - 1)
+        }
     }
 }
 
@@ -469,6 +583,24 @@ pub enum ValidationError {
 pub enum SemanticError {
     #[error("operation references unknown dimension {0:?}")]
     UnknownDimension(String),
+    #[error("slice steps must not be zero")]
+    ZeroSliceStep,
+    #[error("scalar positional index for dimension {dimension:?} must be an integer")]
+    NonIntegerPosition { dimension: String },
+    #[error("index {index} is out of bounds for dimension {dimension:?} of length {length}")]
+    IndexOutOfBounds {
+        dimension: String,
+        index: i64,
+        length: u64,
+    },
+    #[error("mask for dimension {dimension:?} has length {actual}, expected {expected}")]
+    MaskLengthMismatch {
+        dimension: String,
+        expected: u64,
+        actual: u64,
+    },
+    #[error("slice output length for dimension {dimension:?} cannot fit in u64")]
+    SliceLengthOverflow { dimension: String },
     #[error("chunk blocks for dimension {dimension:?} overflowed u64")]
     ChunkBlockTotalOverflow { dimension: String },
     #[error(
@@ -514,7 +646,6 @@ mod tests {
             shape(&[("time", 10), ("lat", 2)]),
             vec![
                 Operation::Select {
-                    mode: SelectionMode::Position,
                     indexers: BTreeMap::from([(
                         dim("time"),
                         Indexer::Slice {
@@ -549,7 +680,6 @@ mod tests {
         assert!(Plan::new(
             shape(&[]),
             vec![Operation::Select {
-                mode: SelectionMode::Position,
                 indexers: BTreeMap::new(),
             }]
         )
@@ -705,6 +835,136 @@ mod tests {
         assert_eq!(
             empty_blocks_for_empty_dimension.infer_shape(&shape(&[("time", 0)])),
             Ok(shape(&[("time", 0)]))
+        );
+    }
+
+    #[test]
+    fn positional_selection_preserves_duplicate_and_reordered_positions() {
+        let selection = Operation::Select {
+            indexers: BTreeMap::from([(
+                dim("time"),
+                Indexer::Positions {
+                    values: vec![2, 2, 0, -1],
+                },
+            )]),
+        };
+        assert_eq!(
+            selection.infer_shape(&shape(&[("time", 3)])),
+            Ok(shape(&[("time", 4)]))
+        );
+    }
+
+    #[test]
+    fn scalar_selection_removes_a_dimension_and_checks_bounds() {
+        let selection = Operation::Select {
+            indexers: BTreeMap::from([(
+                dim("time"),
+                Indexer::Scalar {
+                    value: Literal::Integer(-1),
+                },
+            )]),
+        };
+        assert_eq!(
+            selection.infer_shape(&shape(&[("time", 3), ("lat", 2)])),
+            Ok(shape(&[("lat", 2)]))
+        );
+
+        let invalid = Operation::Select {
+            indexers: BTreeMap::from([(
+                dim("time"),
+                Indexer::Scalar {
+                    value: Literal::Integer(3),
+                },
+            )]),
+        };
+        assert_eq!(
+            invalid.infer_shape(&shape(&[("time", 3)])),
+            Err(SemanticError::IndexOutOfBounds {
+                dimension: "time".to_owned(),
+                index: 3,
+                length: 3,
+            })
+        );
+    }
+
+    #[test]
+    fn slices_follow_python_positional_rules() {
+        let stepped = Operation::Select {
+            indexers: BTreeMap::from([(
+                dim("time"),
+                Indexer::Slice {
+                    start: Some(-5),
+                    stop: Some(-1),
+                    step: Some(2),
+                },
+            )]),
+        };
+        assert_eq!(
+            stepped.infer_shape(&shape(&[("time", 6)])),
+            Ok(shape(&[("time", 2)]))
+        );
+
+        let reversed = Operation::Select {
+            indexers: BTreeMap::from([(
+                dim("time"),
+                Indexer::Slice {
+                    start: None,
+                    stop: None,
+                    step: Some(-1),
+                },
+            )]),
+        };
+        assert_eq!(
+            reversed.infer_shape(&shape(&[("time", 6)])),
+            Ok(shape(&[("time", 6)]))
+        );
+
+        let empty = Operation::Select {
+            indexers: BTreeMap::from([(
+                dim("time"),
+                Indexer::Slice {
+                    start: Some(4),
+                    stop: Some(2),
+                    step: None,
+                },
+            )]),
+        };
+        assert_eq!(
+            empty.infer_shape(&shape(&[("time", 6)])),
+            Ok(shape(&[("time", 0)]))
+        );
+    }
+
+    #[test]
+    fn masks_must_match_the_selected_dimension_length() {
+        let valid = Operation::Select {
+            indexers: BTreeMap::from([(
+                dim("time"),
+                Indexer::Mask {
+                    values: vec![true, false, true],
+                },
+            )]),
+        };
+        assert_eq!(
+            valid.infer_shape(&shape(&[("time", 3)])),
+            Ok(shape(&[("time", 2)]))
+        );
+
+        let invalid = Operation::Select {
+            indexers: BTreeMap::from([(
+                dim("time"),
+                Indexer::Mask {
+                    values: vec![true, false],
+                },
+            )]),
+        };
+        assert_eq!(
+            invalid.infer_shape(&shape(&[("time", 3)])),
+            Err(SemanticError::MaskLengthMismatch {
+                dimension: "time".to_owned(),
+                expected: 3,
+                actual: 2,
+            })
         );
     }
 }
