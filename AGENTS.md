@@ -25,7 +25,7 @@ yet.
 
 - Prefer named structs, explicit enums, ordinary `impl` blocks and readable tests.
 - Avoid macro-generated type families, generic frameworks and clever lifetimes unless a
-  concrete case needs them. The maintainer is learning Rust, and the code should be
+  concrete case needs them. The maintainer is not a Rust expert, and the code should be
   easy to read and extend.
 - Each code PR explains the Rust concepts it uses, its one semantic decision, how to run
   it, and what is still missing.
