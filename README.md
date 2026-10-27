@@ -27,6 +27,9 @@ The first release contains:
 An adapter must either emit an equivalent target operation or return an error. It must not
 silently approximate, erase, or execute an ArrIR operation.
 
+Design proposals for an `Open` operation and a generic chunked layout are in
+[plan/design/](plan/design/README.md).
+
 ## Portable versus host-specific operations
 
 Not every operation is portable. A weighted xarray reduction that carries a live Python
