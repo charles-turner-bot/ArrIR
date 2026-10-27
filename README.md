@@ -62,5 +62,9 @@ The work is intentionally divided into reviewable bites:
 6. **Binary operations and schemas:** only after a concrete `merge`/`where`-style use case
    earns the move from a linear list to a graph or tree.
 
+A complementary staged map, from shapes and effects through regions, byte references,
+demand-driven planning and coordinates to host adapters, is proposed in
+[docs/shells.md](docs/shells.md).
+
 The sequencing is important: a host adapter should consume a stable operation algebra, not
 become the place where that algebra is invented.
