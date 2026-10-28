@@ -61,6 +61,31 @@ All are proposed, pending Mike's answers. The details are in [grids.md](grids.md
   xgcm and SGRID for staggering, xESMF's corner arrays for bounds, uxarray for meshes,
   xdggs for DGGS.
 
+## Known issues for the stacked PRs
+
+A review of the full draft, before it was split, found these. None changes the schema
+shapes proposed here. Each is fixed in the PR that designs the section it affects.
+
+### Select on grids
+
+- **Strides on `Area` grids.** Multiplying the affine step by a stride greater than 1
+  makes each selected cell claim the cells skipped beside it. Selected cells no longer
+  tile, which an affine transform can't describe.
+- **Reverse slices.** For a negative stride, the new origin is the far edge of the first
+  selected cell, not its original corner.
+- **Scalar indexers.** The draft said they keep their dimension. The contract says a
+  scalar indexer drops it.
+
+### Warp
+
+- **Cell edges for `Nearest` and `Mode`.** Both use containment or overlap, which need
+  cell edges. Grids with centre coordinates only don't have them.
+- **Each variable needs its own output.** One data type, nodata value and resampling
+  method for the whole warp can't serve integer and float variables together, or
+  categorical and continuous ones.
+- **Validating the target geometry.** A bare binding gives validation nothing to check
+  offline. The target needs a declared schema, as `Open` has.
+
 ## Questions for Mike
 
 Listed in [grids.md](grids.md#questions-for-mike): the grid reference, WKT2 or
