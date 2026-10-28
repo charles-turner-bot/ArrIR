@@ -83,6 +83,11 @@ Working through the fixes also showed that "in step", for staggered dimensions, 
 be stated now: a table gives which points belong to the selected cells at each
 position.
 
+A second review found that reversing an axis must swap `Left` and `Right`. Positions
+are relative to increasing index, so a face on the lower-index side of a cell is on its
+higher-index side once the axis is reversed. Keeping the same position would misplace
+every staggered variable on a reversed axis, NEMO's `u` included.
+
 ### Warp
 
 - **Cell edges for `Nearest` and `Mode`.** Both use containment or overlap, which need

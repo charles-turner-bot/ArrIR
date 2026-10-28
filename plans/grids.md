@@ -344,6 +344,17 @@ source.
 A variable staggered on the centre dimension itself, as NEMO does, is always in step,
 since it's sliced with the centres.
 
+**A negative step swaps `Left` and `Right` on that axis.** Positions are relative to
+increasing index. After a reversal, the face that was on a cell's lower-index side is
+on its higher-index side. So for every placement and every coordinate entry on the
+grid, a negative step on the column axis turns `Left` into `Right` on that axis, and
+`Right` into `Left`. The same applies on the row axis. `Centre`, `Inner` and `Outer`
+keep their position, with their points in reversed order.
+
+For example, NEMO's `u` is `Right` on the column axis. Reversing the column axis makes
+it `Left`. In a curvilinear model, a `(Left, Centre)` entry becomes `(Right, Centre)`.
+When both entries exist, they swap.
+
 ### Other indexers
 
 - **A scalar indexer drops its dimension,** as the contract's conventions say, and
