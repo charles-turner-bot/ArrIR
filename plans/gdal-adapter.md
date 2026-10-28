@@ -67,9 +67,8 @@ A plan that needs one VRT has no parts.
   grid. That happens, for example, when a warp leaves some variables on the source grid.
   Classic output rejects it, and multidimensional output holds each variable on its own
   dimensions.
-- **Variables with different missing values** can't share classic bands' nodata either,
-  when GDAL requires one per dataset. Each band carries its own, which classic VRT
-  allows.
+- **Variables with different missing values** are fine. Classic VRT sets nodata per
+  band.
 
 ## What it rejects
 
