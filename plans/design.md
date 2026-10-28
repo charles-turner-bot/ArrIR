@@ -1,14 +1,16 @@
 # ArrIR: extraction contract
 
 Status: agreed direction, amended 2026-10-27 (see
-[the 27 October discussion](2026-10-27-discussion.md)). Implementation proceeds in the
-small steps below.
+[the 27 October discussion](2026-10-27-discussion.md)). The 28 October amendments are
+proposed (see [the 28 October discussion](2026-10-28-discussion.md)). Implementation
+proceeds in the small steps below.
 
 ## Purpose
 
 Extract the semantic IR that xrexpr developed to make its optimiser sound.
 The same representation must support both shared rewrites and translation between
-named-array implementations, initially xrexpr/xarray and xarray-ts.
+named-array implementations, initially xrexpr/xarray and xarray-ts, and lowering to
+GDAL.
 
 ```text
 host calls -> host lowering -> ArrIR -> optional rewrites -> target adapter
@@ -79,6 +81,22 @@ Added on 27 October:
   byterefs decision records, not through ArrIR.
 - **Components form a dependency graph, not a sequence of layers** (see
   [Architecture](#architecture)).
+
+Proposed on 28 October, designed in [grids.md](grids.md):
+
+- **GDAL is a target.** A plan must be able to lower to GDAL VRT, not only to
+  xarray-shaped hosts. That needs grids in the schema, `Select` effects on grids, a
+  `Warp` operation and a GDAL adapter, proposed in that order as stacked PRs.
+- **Grids are schema entities.** A grid owns its dimensions, the CRS, the pixel
+  interpretation and a declared coordinate model (affine, rectilinear or curvilinear).
+  Spatial variables, and their coordinate variables, refer to a grid.
+- **Staggering is part of the schema from the start.** Each gridded variable records its
+  position on each axis, so A, B and C grids are all representable. Cell bounds are the
+  coordinates at the `Outer` position.
+- **The design is not GDAL-shaped.** Grid kinds beyond 2-D rasters (meshes, discrete
+  global grids, N-D grids) are sketched in grids.md, so adding them is a new variant,
+  not a change. Each grid concept is checked against at least one non-GDAL
+  implementation (xgcm, SGRID, uxarray, xdggs) before it's agreed.
 
 ## Architecture
 
@@ -177,7 +195,7 @@ include `skipna`, `ddof`, `drop`, grouping boundaries, and window alignment.
 Do not replace this audit with an untyped `args`/`kwargs` JSON bag.
 
 Portable symbol IDs are strings with distinct Rust types for dimensions,
-variables and external bindings. They are not coordinate values. A host with
+variables, external bindings and grids. They are not coordinate values. A host with
 non-string names assigns collision-free symbols and retains its name mapping.
 An empty host name need not be rejected just because it is an empty string.
 
@@ -216,7 +234,8 @@ do not omit a semantic field or its tests to satisfy the line count.
    scaffold moves to `arrir::legacy`.
 3. Logical schema in `arrir-types`: variable dimensions, coordinate roles, and
    known/unknown sizes, with small invariant tests. #16's `ArraySchema` is the starting
-   point, widened to a dataset.
+   point, widened to a dataset. Then, in separate PRs: grids, CRS and pixel
+   interpretation, and staggered placements, as in [grids.md](grids.md).
 4. Positional indexer values, then label/advanced-index and binding values in
    separate PRs. Preserve source distinctions used by rewrite proofs.
 5. A deliberately bounded reduction specification with explicit result options;
