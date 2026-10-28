@@ -101,6 +101,8 @@ Proposed on 28 October, designed in [grids.md](grids.md):
   explicit: resampling, output type and nodata for each variable, the edge rule and the
   transformer's error threshold. Resampling methods are defined in ArrIR, not by any
   adapter.
+- **The GDAL adapter renders VRT text** ([gdal-adapter.md](gdal-adapter.md)). It does no
+  I/O and doesn't link GDAL, and it rejects what GDAL can't do exactly.
 
 ## Architecture
 
@@ -136,7 +138,7 @@ coupled to everything built before it.
    footprints
      /         \                                 |
 arrir-logical   adapters                         |
-rewrites        xrexpr, xarray-ts, ...           |
+rewrites        xrexpr, xarray-ts, GDAL, ...     |
      \______________________|____________________/
                             |
                       arrir-physical
@@ -250,7 +252,9 @@ do not omit a semantic field or its tests to satisfy the line count.
    but before any physical planning. Until an operation has one, it can't be physically
    planned. `Warp` follows in its own PR, as in [warp.md](warp.md).
 7. Schema propagation along the chain, and unknown-fact handling.
-8. An xrexpr adapter for this subset, first with import/export round-trip tests.
+8. An xrexpr adapter for this subset, first with import/export round-trip tests. Then a
+   GDAL adapter for `Open`, positional `Select` and `Warp`, tested against `gdal.Warp`
+   through `gdalxarray`, as in [gdal-adapter.md](gdal-adapter.md).
 9. One existing rewrite in `arrir-logical`, tested against xrexpr's rule and execution
    oracle.
 10. xarray-ts adapter/conformance fixtures for the same subset, then broaden

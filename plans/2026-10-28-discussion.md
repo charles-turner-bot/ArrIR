@@ -60,6 +60,11 @@ All are proposed, pending Mike's answers. The details are in [grids.md](grids.md
 - **Each concept is checked against a non-GDAL implementation** before it's agreed:
   xgcm and SGRID for staggering, xESMF's corner arrays for bounds, uxarray for meshes,
   xdggs for DGGS.
+- **The GDAL adapter renders VRT text** ([gdal-adapter.md](gdal-adapter.md)), and does
+  no I/O. It doesn't link GDAL, so it builds and tests without GDAL installed. Its
+  execution tests run the emitted VRT through `gdalxarray`. When GDAL can't do what a
+  plan says exactly, the adapter rejects the plan, so GDAL stays one adapter among
+  several.
 
 ## Known issues for the stacked PRs
 
