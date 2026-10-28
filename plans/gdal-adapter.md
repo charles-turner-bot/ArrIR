@@ -12,7 +12,7 @@ own reads, fetches only the windows a consumer asks for, and warps. `gdalxarray`
 read.
 
 It's an ordinary adapter. It depends on `arrir` and `arrir-types` only, does no I/O,
-and doesn't link GDAL (purity rule 6). Its output is a string.
+and doesn't link GDAL (purity rule 6). Its output is text (see [Output](#output)).
 
 It's one adapter among several. ArrIR's semantics are defined in the plans, not by GDAL.
 Where GDAL can't do exactly what a plan says, the adapter rejects the plan (purity
@@ -38,8 +38,38 @@ multidimensional dataset.
 - **Curvilinear sources** render their `(Centre, Centre)` coordinates as GDAL
   geolocation arrays (`X_DATASET`, `Y_DATASET`), which gdalwarp reads itself.
 - **Multidimensional sources** render as a multidimensional VRT (question 1).
-- **A warp with several resampling methods** renders as one warp per method, each over
-  the variables that use it.
+- **A warp with several resampling methods** renders as one warped VRT per method,
+  each over the variables that use it, combined as below.
+
+## Output
+
+```rust
+pub struct VrtBundle {
+    /// The dataset the plan produces. Open this one.
+    pub main: String,
+    /// VRTs that `main` refers to, by relative file name.
+    pub parts: Vec<(String, String)>,
+}
+```
+
+A VRT source can't inline another VRT's XML, only refer to it by file name. So a plan
+that needs more than one VRT, such as a warp with several methods, renders as a bundle.
+The host writes the parts beside `main`, or into GDAL's `/vsimem/`, before opening it.
+A plan that needs one VRT has no parts.
+
+`main` is one dataset holding the plan's output variables, and only those:
+
+- **Classic output:** one band per variable, in schema order, with the variable's name
+  as the band description. Its nodata is the variable's declared missing value.
+- **Multidimensional output:** one array per variable, with the variable's name,
+  dimensions and missing value.
+- **Variables on different grids** can't share a classic raster, whose bands share one
+  grid. That happens, for example, when a warp leaves some variables on the source grid.
+  Classic output rejects it, and multidimensional output holds each variable on its own
+  dimensions.
+- **Variables with different missing values** can't share classic bands' nodata either,
+  when GDAL requires one per dataset. Each band carries its own, which classic VRT
+  allows.
 
 ## What it rejects
 
@@ -58,14 +88,26 @@ multidimensional dataset.
   it (question 2).
 - A `Rounding` or `OutOfRange` variant that gdalwarp doesn't implement exactly
   ([warp.md](warp.md) question 4).
-- A `Mode` tie rule that differs from GDAL's ([warp.md](warp.md) question 1).
+- `Mode`, unless gdalwarp's tie rule matches one `ModeTie` variant, and then only that
+  variant ([warp.md](warp.md) question 1).
+- A plan whose output variables don't fit one classic dataset, when the source is
+  classic (see [Output](#output)).
 
 ## Done when
 
-For each fixture, the emitted VRT, opened through `gdalxarray`, matches `gdal.Warp` or
-`gdal.Translate` run directly on the same source, value for value.
+Two checks, which show different things:
 
-The fixtures include:
+1. **Rendering.** For each fixture, the emitted bundle, opened through `gdalxarray`,
+   matches `gdal.Warp` or `gdal.Translate` run directly with the same options, value for
+   value. This shows the adapter says to GDAL what the plan says. It can't show that
+   GDAL computes what ArrIR means.
+2. **Meaning.** For each [reference fixture](warp.md#reference-fixtures) the adapter
+   accepts, the emitted bundle's output matches the hand-worked expected values, within
+   the fixture's tolerance. Every fixture the adapter rejects is listed, with the
+   reason. Where GDAL disagrees with a definition, the adapter rejects that case. The
+   definition doesn't change to fit GDAL.
+
+The rendering fixtures include:
 - a COG;
 - a multidimensional NetCDF;
 - a curvilinear swath;

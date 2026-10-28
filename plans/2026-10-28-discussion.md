@@ -65,6 +65,11 @@ All are proposed, pending Mike's answers. The details are in [grids.md](grids.md
   execution tests run the emitted VRT through `gdalxarray`. When GDAL can't do what a
   plan says exactly, the adapter rejects the plan, so GDAL stays one adapter among
   several.
+  A second review found two gaps in its first version. It promised one VRT string, but
+  a warp with several methods needs several VRTs, which can't be inlined into one. So
+  its output is a bundle, a main VRT plus the parts it refers to, with one band or
+  array per output variable. And its only test compared GDAL with GDAL, which checks
+  rendering, not meaning. It must also match the hand-worked reference fixtures.
 
 ## Known issues for the stacked PRs
 
