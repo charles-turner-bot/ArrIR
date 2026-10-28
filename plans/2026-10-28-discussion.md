@@ -68,13 +68,20 @@ shapes proposed here. Each is fixed in the PR that designs the section it affect
 
 ### Select on grids
 
-- **Strides on `Area` grids.** Multiplying the affine step by a stride greater than 1
-  makes each selected cell claim the cells skipped beside it. Selected cells no longer
-  tile, which an affine transform can't describe.
-- **Reverse slices.** For a negative stride, the new origin is the far edge of the first
-  selected cell, not its original corner.
-- **Scalar indexers.** The draft said they keep their dimension. The contract says a
-  scalar indexer drops it.
+Resolved in the `Select` PR, in [grids.md](grids.md#select-on-a-grid):
+
+- **Strides on `Area` grids** remove the placement. The alternative, a cell extent
+  separate from the spacing, keeps decimated grids warpable but adds a field to every
+  affine grid. Striding before a warp is rare, since proper decimation averages, so
+  the simpler rule comes first. The extent can be added later without changing it.
+- **Reverse slices** put the origin at `x0 + (s+1)*dx`, the far edge of the first
+  selected cell, and negate the steps.
+- **Scalar indexers** drop their dimension and remove the placement, as the contract's
+  conventions say.
+
+Working through the fixes also showed that "in step", for staggered dimensions, could
+be stated now: a table gives which points belong to the selected cells at each
+position.
 
 ### Warp
 
