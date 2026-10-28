@@ -91,6 +91,17 @@ Resolved in the `Warp` PR, in [warp.md](warp.md):
   `Open` has. Validation checks it offline, and the host checks the real dataset when
   it resolves the binding.
 
+A second review found three more gaps, also fixed there:
+
+- **`Mode` had no tie rule,** so an adapter had nothing to match. It's now an option,
+  `ModeTie::Smallest` or `Largest`.
+- **"Invalid if an empty cell can happen" can't be checked offline.** It depends on the
+  data and on the geometry. So `target_nodata` is always required, and each variable
+  declares its missing values in the logical schema. They can't come from the layout's
+  `fill`, because `arrir` can't depend on `arrir-layout`.
+- **Comparing GDAL with GDAL can't show GDAL matches ArrIR's definitions.** Hand-worked
+  reference fixtures now check the meaning, and every adapter must match them.
+
 ## Questions for Mike
 
 Listed in [grids.md](grids.md#questions-for-mike): the grid reference, WKT2 or
