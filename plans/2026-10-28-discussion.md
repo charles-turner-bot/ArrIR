@@ -78,13 +78,18 @@ shapes proposed here. Each is fixed in the PR that designs the section it affect
 
 ### Warp
 
-- **Cell edges for `Nearest` and `Mode`.** Both use containment or overlap, which need
-  cell edges. Grids with centre coordinates only don't have them.
-- **Each variable needs its own output.** One data type, nodata value and resampling
-  method for the whole warp can't serve integer and float variables together, or
-  categorical and continuous ones.
-- **Validating the target geometry.** A bare binding gives validation nothing to check
-  offline. The target needs a declared schema, as `Open` has.
+Resolved in the `Warp` PR, in [warp.md](warp.md):
+
+- **Cell edges** come from an explicit `EdgeRule`. `FromBounds` uses the grid's bounds.
+  `MidpointsBetweenCentres` implies edges, and has to be stated. Making `Nearest`
+  invalid without bounds would block the common swath case, and implying edges
+  silently would break purity rule 4.
+- **Each variable has its own output:** method, data type, rounding, out-of-range rule
+  and nodata. Variables not listed stay on the source grid. GDAL's one method for all
+  bands is a limit of that adapter, which emits one warp per method or rejects.
+- **The target geometry is a `GeometryBinding`,** a binding with a declared schema, as
+  `Open` has. Validation checks it offline, and the host checks the real dataset when
+  it resolves the binding.
 
 ## Questions for Mike
 

@@ -97,6 +97,10 @@ Proposed on 28 October, designed in [grids.md](grids.md):
   global grids, N-D grids) are sketched in grids.md, so adding them is a new variant,
   not a change. Each grid concept is checked against at least one non-GDAL
   implementation (xgcm, SGRID, uxarray, xdggs) before it's agreed.
+- **`Warp` is an operation** ([warp.md](warp.md)), with every result-affecting option
+  explicit: resampling, output type and nodata for each variable, the edge rule and the
+  transformer's error threshold. Resampling methods are defined in ArrIR, not by any
+  adapter.
 
 ## Architecture
 
@@ -244,7 +248,7 @@ do not omit a semantic field or its tests to satisfy the line count.
    linear plan starting with `Open`, and structural validation, split into
    independently understandable PRs. Footprints, the other half of rule 3, come later
    but before any physical planning. Until an operation has one, it can't be physically
-   planned.
+   planned. `Warp` follows in its own PR, as in [warp.md](warp.md).
 7. Schema propagation along the chain, and unknown-fact handling.
 8. An xrexpr adapter for this subset, first with import/export round-trip tests.
 9. One existing rewrite in `arrir-logical`, tested against xrexpr's rule and execution

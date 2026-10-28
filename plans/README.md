@@ -8,6 +8,8 @@ This directory preserves the reasoning behind ArrIR, not just a list of features
   the byterefs specification.
 - [Grids, CRS and staggering](grids.md): proposed. How the schema represents spatial
   grids, the first step towards lowering plans to GDAL.
+- [Warp](warp.md): proposed. Reprojection and regridding between grids, with
+  resampling defined independently of any engine.
 - [26 October 2026 discussion](2026-10-26-discussion.md): why the old scaffold is
   being replaced and the constraints Charles set for the rebuild.
 - [27 October 2026 discussion](2026-10-27-discussion.md): reconciling #16 and #17 with
