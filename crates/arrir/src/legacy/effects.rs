@@ -18,7 +18,7 @@ use std::collections::BTreeSet;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::{DimId, DimSet, Indexer, Literal, Operation, Plan, SelectionMode};
+use super::{DimId, DimSet, Indexer, Literal, Operation, Plan, SelectionMode};
 
 /// The length of one dimension, when it can be known without data.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -310,8 +310,8 @@ fn slice_len(n: u64, start: Option<i64>, stop: Option<i64>, step: Option<i64>) -
 mod tests {
     use std::collections::{BTreeMap, BTreeSet};
 
+    use super::super::Reduction;
     use super::*;
-    use crate::Reduction;
 
     fn dim(value: &str) -> DimId {
         DimId::new(value).unwrap()

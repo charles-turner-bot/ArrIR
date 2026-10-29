@@ -1,6 +1,6 @@
 # Shells: a staged map for the ArrIR core
 
-Status: proposal, for discussion. Shell 1 is implemented in `src/effects.rs`; everything
+Status: proposal, for discussion. Shell 1 is implemented in `crates/arrir/src/legacy/effects.rs`; everything
 after it is a light map, not a commitment.
 
 ## The core in one sentence

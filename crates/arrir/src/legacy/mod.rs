@@ -1,18 +1,15 @@
-//! ArrIR is a portable intermediate representation for *unary* array operation plans.
+//! The scaffold ArrIR started from: a linear list of unary operations, kept while its
+//! replacement is built.
 //!
-//! A host-specific adapter lowers an xarray, Polars, JavaScript, or other plan into
-//! [`Plan`]. Another adapter either emits an equivalent target plan or reports that it
-//! cannot support one of the operations. The core never stores host runtime objects and
-//! never touches array data.
+//! It has its own `DimId`, which rejects empty names, unlike `arrir_types::DimId`.
+//! Nothing converts between the two (`plans/design.md`). The module is retired once the
+//! replacement covers its operations.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-/// Replacement semantic core; see `plans/design.md` for the migration roadmap.
-/// The root-level types below remain the legacy scaffold, not conversion APIs.
-pub mod portable;
 pub mod effects;
 pub use effects::{ArraySchema, Dim, DimEffect, EffectError, Extent, OperationEffect};
 

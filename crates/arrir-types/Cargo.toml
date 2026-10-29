@@ -1,0 +1,13 @@
+[package]
+name = "arrir-types"
+description = "Shared value types for ArrIR: portable symbol IDs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
