@@ -286,6 +286,119 @@ Validation rules:
   rejected. A variable that is gridded must say so.
 - A variable that is placed on a grid must also span the placement's two dimensions.
 
+## Select on a grid
+
+`Select`'s effect on grids is fixed here, before `Select` is written (roadmap step 6),
+so that adding `Warp` later doesn't change it. The rules apply after the selection's
+indexers are normalised: a slice becomes a start `s`, a nonzero step `k` and a result
+length `M`.
+
+### Affine grids
+
+A slice on the column axis changes the transform as follows. The row axis is the same,
+with `rx` and `dy` in place of `dx` and `ry`.
+
+| Slice | New origin | New steps | Placement |
+| --- | --- | --- | --- |
+| any `k` | `x0 + (s + (1-k)/2)*dx`, `y0 + (s + (1-k)/2)*ry` | `k*dx`, `k*ry` | kept |
+
+- **Each selected sample keeps its centre.** Cell `s + i*k` was centred at
+  `x0 + (s + i*k + 0.5)*dx`. The new transform puts new cell `i` there. For `k = 1` the
+  origin is `x0 + s*dx`. For `k = -1` it's `x0 + (s+1)*dx`, the far edge of the first
+  selected cell, because the transform stays corner-anchored.
+- **A stride widens the cells of an `Area` grid.** With `|k| > 1`, each selected cell
+  stands for a cell `k` times as wide, centred on its sample. This reinterpretation is
+  part of `Select`'s stated effect. It isn't an approximation an adapter makes. The
+  grid stays affine, so a decimated variable can still be warped. Values aren't
+  changed: a stride picks samples, and averaging is `Warp`'s job.
+- **With an even stride, the outer cells overhang.** With `s = 0` and `k = 4`, the first
+  new cell starts 1.5 source cells before the source's edge. The extent grows by up to
+  `(|k| - 1)/2` cells on each side.
+- **A `Point` grid follows the same arithmetic.** Its samples keep their positions and
+  only the spacing changes.
+- **An empty result keeps the placement and the transform.** With no cells, the
+  transform describes nothing, and any value would do. Keeping it avoids a special case.
+
+This arithmetic lives in `arrir-types`, beside `GridModel`.
+
+### Rectilinear and curvilinear grids
+
+Their coordinate variables are placed on the grid, so they're sliced by the ordinary
+`Select` effect, like any variable spanning the selected dimension. No grid-specific
+arithmetic is needed.
+
+### Staggered dimensions
+
+A staggered variable or coordinate on its own dimension (MOM's `xu_ocean`, or a bounds
+dimension of length `N + 1`) isn't sliced when the centre dimension is. It keeps its
+placement only when the plan selects its dimension **in step** with the centre
+dimension. Otherwise its placement is removed. For a grid coordinate, the model's entry
+for that position is removed with it.
+
+For a slice of `k = ±1` on the centre dimension, "in step" means selecting the points at
+that position that belong to the selected cells, in the same order:
+
+| Position | Length | In step with centres `s, s+k, …` (`M` of them) |
+| --- | --- | --- |
+| `Centre`, `Left`, `Right` | `N` | the same `M` indices |
+| `Inner` | `N - 1` | the `M - 1` faces between the selected centres |
+| `Outer` | `N + 1` | the `M + 1` edges of the selected cells |
+
+For `|k| > 1`, only `Centre` can be in step, by selecting with the same `s` and `k`.
+`Left` and `Right` points are half a source cell from their centres, but the widened
+cells' faces are `k/2` source cells away, so those points no longer sit on a face.
+`Inner` and `Outer` points between the strided cells aren't in the source. All four
+lose their placement. On a rectilinear or curvilinear grid this removes the bounds,
+so a later `Warp` needs `EdgeRule::MidpointsBetweenCentres`. For an evenly spaced
+rectilinear grid, the midpoints are the same widened cells as on an affine one.
+
+A variable staggered on the centre dimension itself, as NEMO does, is always in step,
+since it's sliced with the centres.
+
+**A negative step swaps `Left` and `Right` on that axis.** Positions are relative to
+increasing index. After a reversal, the face that was on a cell's lower-index side is
+on its higher-index side. So for every placement and every coordinate entry on the
+grid, a negative step on the column axis turns `Left` into `Right` on that axis, and
+`Right` into `Left`. The same applies on the row axis. `Centre`, `Inner` and `Outer`
+keep their position, with their points in reversed order.
+
+For example, NEMO's `u` is `Right` on the column axis. Reversing the column axis makes
+it `Left`. In a curvilinear model, a `(Left, Centre)` entry becomes `(Right, Centre)`.
+When both entries exist, they swap.
+
+### Other indexers
+
+- **A scalar indexer drops its dimension,** as the contract's conventions say, and
+  removes every placement on that grid. A grid with one axis left is no longer a
+  `Horizontal` grid.
+- **A position list or a mask** keeps its dimension, as the conventions say, but removes
+  every placement on that grid. The selected cells don't form an affine, rectilinear or
+  curvilinear grid in general.
+- **A label selection** becomes one of the above once it's resolved. Until then, the
+  grid after the selection is unknown, like an unknown size. Operations that need the
+  grid, such as `Warp`, can't be validated until the label is resolved.
+
+When a placement is removed, the variables keep their data and dimensions. They are
+ordinary variables from then on, and a later `Warp` on them is invalid.
+
+### Planned grid kinds
+
+So the rules are known before the variants exist:
+
+- **`Mesh`:** any selection on a mesh dimension removes the placement, because the
+  connectivity would refer to nodes or faces that were dropped. Subsetting a mesh
+  properly is its own operation, designed with the variant.
+- **`Dggs`:** a selection on the cell dimension changes `CellIds`. Any subset of cells
+  is still a valid DGGS grid, since each position names its cell.
+  - A slice `s, k` of `All` gives `Range { start: s, step: k }`, and a slice of
+    `Range { start, step }` gives `Range { start: start + s*step, step: step*k }`.
+  - Any selection on `Listed` slices its coordinate variable, by the ordinary effect.
+  - A position list or a mask on `All` or `Range` removes the placement for now. The
+    selected IDs aren't stored anywhere, and can't be listed without a variable to hold
+    them (question 8).
+  - A scalar indexer drops the cell dimension and removes the placement.
+- **`Structured`:** per axis, as for `Horizontal`.
+
 ## Checked against more than GDAL
 
 So that the design isn't GDAL-shaped, each concept is checked against at least one
@@ -295,6 +408,7 @@ can represent the concept as defined here, or says exactly why not.
 | Concept | Non-GDAL reference |
 | --- | --- |
 | `Horizontal` grids, staggering, bounds at `Outer` | xgcm; SGRID; xESMF's `lon_b` and `lat_b` |
+| `Select` on grids | odc-geo's `GeoBox` slicing for affine grids; xgcm for staggered dimensions |
 | `Mesh` | UGRID; uxarray |
 | `Dggs` | xdggs; healpy; h3 |
 
@@ -425,6 +539,14 @@ through a versioned schema change that maps old plans onto it exactly.
    arrays default to the corner (`GEOREFERENCING_CONVENTION=TOP_LEFT_CORNER`), so
    a source that means centres has to say so.
 5. Do `Centre`, `Left`, `Right`, `Inner` and `Outer` cover the ocean models you use?
+6. Is the "in step" table for staggered dimensions right for MOM-style files?
+7. A stride now keeps the grid, by widening each cell around its sample. Is that what
+   a decimation should mean? A decimation is then arithmetic on the transform and a
+   slice of the coordinate arrays, and a later `Warp` does any averaging.
+8. A position list or mask on a DGGS grid whose IDs are `All` or `Range` removes the
+   placement. Should `Select` instead add a `cell_ids` coordinate, computed from the
+   positions, so the result is a `Listed` grid? xdggs always stores `cell_ids`, but this
+   means an operation creates a variable that wasn't selected.
 
 ## Not settled
 

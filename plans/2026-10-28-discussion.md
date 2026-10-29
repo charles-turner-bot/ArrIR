@@ -69,16 +69,31 @@ that PR's copy of this note records how.
 
 ### Select on grids
 
-Fixed in #21 (`design/grids-select`), in the "Select on a grid" section of grids.md:
+Resolved in the `Select` PR, in [grids.md](grids.md#select-on-a-grid):
 
-- **Strides on `Area` grids.** The draft multiplied the affine step by the stride and
-  kept the corner, so each selected cell claimed the cells skipped beside it, and the
-  samples moved. #21 keeps each sample's centre and widens each cell to `k` source
-  cells, which an affine transform describes.
-- **Reverse slices.** For a negative stride, the new origin is the far edge of the first
-  selected cell, not its original corner. #21's single origin formula covers this.
-- **Scalar indexers.** The draft said they keep their dimension. The contract says a
-  scalar indexer drops it. #21 drops it and removes the placement.
+- **Strides keep the grid.** Each selected sample keeps its centre, and on an `Area`
+  grid each cell widens to `k` source cells. The first version removed the placement
+  instead, because the selected cells no longer tile. Mike's review rejected that,
+  since nothing requires a decimated grid to lose its georeferencing and it has to stay
+  warpable. Widening doesn't need the separate cell-extent field that was considered,
+  because the step is the extent. Writing out the arithmetic also found two errors in
+  the first version. Its `Point` origin, `x0 + s*dx` with step `k*dx`, moved every
+  sample by `(k-1)/2` cells. And it let `Left` and `Right` stay in step under a
+  stride, but their points are half a source cell from the centre, not on the faces of
+  the widened cells.
+- **Reverse slices** put the origin at `x0 + (s+1)*dx`, the far edge of the first
+  selected cell, and negate the steps.
+- **Scalar indexers** drop their dimension and remove the placement, as the contract's
+  conventions say.
+
+Working through the fixes also showed that "in step", for staggered dimensions, could
+be stated now: a table gives which points belong to the selected cells at each
+position.
+
+A second review found that reversing an axis must swap `Left` and `Right`. Positions
+are relative to increasing index, so a face on the lower-index side of a cell is on its
+higher-index side once the axis is reversed. Keeping the same position would misplace
+every staggered variable on a reversed axis, NEMO's `u` included.
 
 ### Warp
 
