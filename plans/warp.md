@@ -100,14 +100,19 @@ with it, is `Cast`'s job.
 
 ### Why the target geometry has a schema
 
-A mesh target is defined by its node coordinates and connectivity. Those are data, not
-parameters, and the plan can't contain data. So the target's geometry is a bound
-dataset. Without this, `Warp` could only reach targets that a few numbers can describe,
-which in practice means GDAL's.
+A regular target is a few numbers: a CRS, a transform and two sizes. Those fit in the
+plan. Other targets are data. A tripolar ocean grid is its `geolon(j, i)` and
+`geolat(j, i)` arrays, and a mesh is its node coordinates and connectivity. The plan
+can't contain data (purity rule 1), so these targets arrive as a binding that the host
+fills, as a source does through `Open`. Without this, `Warp` could only reach the
+regular grids gdalwarp writes.
 
-A bare binding would give validation nothing to check offline. So `GeometryBinding`
-declares the schema the binding must have, as `Open` does. The host checks the real
-dataset against it when it resolves the binding, exactly as it does for `Open`.
+A bare binding is only a name, so validation couldn't check the warp or derive its
+output schema offline. `GeometryBinding` therefore declares what the bound dataset
+will contain: for example, `geolon` and `geolat` on `(yh, xh)`, 1080 × 1440, placed at
+`(Centre, Centre)` on the target grid. Validation checks the plan against that
+declaration. When the host resolves the binding, it checks the real dataset against
+it and fails if they differ, exactly as for `Open`.
 
 ## Resampling
 
