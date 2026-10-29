@@ -388,8 +388,15 @@ So the rules are known before the variants exist:
 - **`Mesh`:** any selection on a mesh dimension removes the placement, because the
   connectivity would refer to nodes or faces that were dropped. Subsetting a mesh
   properly is its own operation, designed with the variant.
-- **`Dggs`:** any positional selection on the cell dimension keeps the placement. Each
-  cell carries its own ID, so a subset of cells is still a valid DGGS grid.
+- **`Dggs`:** a selection on the cell dimension changes `CellIds`. Any subset of cells
+  is still a valid DGGS grid, since each position names its cell.
+  - A slice `s, k` of `All` gives `Range { start: s, step: k }`, and a slice of
+    `Range { start, step }` gives `Range { start: start + s*step, step: step*k }`.
+  - Any selection on `Listed` slices its coordinate variable, by the ordinary effect.
+  - A position list or a mask on `All` or `Range` removes the placement for now. The
+    selected IDs aren't stored anywhere, and can't be listed without a variable to hold
+    them (question 8).
+  - A scalar indexer drops the cell dimension and removes the placement.
 - **`Structured`:** per axis, as for `Horizontal`.
 
 ## Checked against more than GDAL
@@ -535,6 +542,10 @@ through a versioned schema change that maps old plans onto it exactly.
 7. A stride now keeps the grid, by widening each cell around its sample. Is that what
    a decimation should mean? A decimation is then arithmetic on the transform and a
    slice of the coordinate arrays, and a later `Warp` does any averaging.
+8. A position list or mask on a DGGS grid whose IDs are `All` or `Range` removes the
+   placement. Should `Select` instead add a `cell_ids` coordinate, computed from the
+   positions, so the result is a `Listed` grid? xdggs always stores `cell_ids`, but this
+   means an operation creates a variable that wasn't selected.
 
 ## Not settled
 
