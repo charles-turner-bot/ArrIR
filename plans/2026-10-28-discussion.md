@@ -70,6 +70,11 @@ All are proposed, pending Mike's answers. The details are in [grids.md](grids.md
   its output is a bundle, a main VRT plus the parts it refers to, with one band or
   array per output variable. And its only test compared GDAL with GDAL, which checks
   rendering, not meaning. It must also match the hand-worked reference fixtures.
+  Mike's answers settled its two questions. It emits classic warped VRTs, with slices
+  as bands. gdalwarp's geolocation inversion is `MidpointsBetweenCentres` when told
+  the coordinates are centres. His tests also found gdalwarp bugs that set the
+  rejection list (osgeo-upstream#50 to #53), and showed gdalwarp can warp onto a
+  curvilinear target, which leaves the VRT container as the open limit.
 
 ## Known issues for the stacked PRs
 
