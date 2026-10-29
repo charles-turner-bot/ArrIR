@@ -10,6 +10,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+pub mod effects;
+pub use effects::{ArraySchema, Dim, DimEffect, EffectError, Extent, OperationEffect};
+
 /// The wire-format version emitted by [`Plan::new`].
 pub const WIRE_VERSION: u16 = 1;
 
