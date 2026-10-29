@@ -10,6 +10,8 @@ This directory preserves the reasoning behind ArrIR, not just a list of features
   grids, the first step towards lowering plans to GDAL.
 - [Warp](warp.md): proposed. Reprojection and regridding between grids, with
   resampling defined independently of any engine.
+- [Cast](cast.md): proposed. Type conversion with rounding, clamping and missing
+  values stated.
 - [GDAL adapter](gdal-adapter.md): proposed. Rendering plans as GDAL VRT text.
 - [26 October 2026 discussion](2026-10-26-discussion.md): why the old scaffold is
   being replaced and the constraints Charles set for the rebuild.
