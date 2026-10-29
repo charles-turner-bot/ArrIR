@@ -64,7 +64,8 @@ All are proposed, pending Mike's answers. The details are in [grids.md](grids.md
 ## Known issues for the stacked PRs
 
 A review of the full draft, before it was split, found these. None changes the schema
-shapes proposed here. Each is fixed in the PR that designs the section it affects.
+shapes proposed here. Each is fixed in the PR that designs the section it affects, and
+that PR's copy of this note records how.
 
 ### Select on grids
 
@@ -96,13 +97,17 @@ every staggered variable on a reversed axis, NEMO's `u` included.
 
 ### Warp
 
+Fixed in #22 (`design/warp`), in warp.md:
+
 - **Cell edges for `Nearest` and `Mode`.** Both use containment or overlap, which need
-  cell edges. Grids with centre coordinates only don't have them.
-- **Each variable needs its own output.** One data type, nodata value and resampling
-  method for the whole warp can't serve integer and float variables together, or
-  categorical and continuous ones.
+  cell edges. Grids with centre coordinates only don't have them. #22 adds an explicit
+  `EdgeRule` and `EdgeShape`.
+- **Each variable needs its own output.** One resampling method and empty-cell value
+  for the whole warp can't serve categorical and continuous variables together. #22
+  gives each variable its own, and moves type conversion to a separate `Cast`
+  operation (cast.md).
 - **Validating the target geometry.** A bare binding gives validation nothing to check
-  offline. The target needs a declared schema, as `Open` has.
+  offline. #22 declares the target's schema in a `GeometryBinding`, as `Open` does.
 
 ## Questions for Mike
 
