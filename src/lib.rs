@@ -13,6 +13,8 @@ use thiserror::Error;
 /// Replacement semantic core; see `plans/design.md` for the migration roadmap.
 /// The root-level types below remain the legacy scaffold, not conversion APIs.
 pub mod portable;
+pub mod effects;
+pub use effects::{ArraySchema, Dim, DimEffect, EffectError, Extent, OperationEffect};
 
 /// The wire-format version emitted by [`Plan::new`].
 pub const WIRE_VERSION: u16 = 1;
