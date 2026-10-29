@@ -102,6 +102,25 @@ A second review found three more gaps, also fixed there:
 - **Comparing GDAL with GDAL can't show GDAL matches ArrIR's definitions.** Hand-worked
   reference fixtures now check the meaning, and every adapter must match them.
 
+Mike's answers to the warp questions, from GDAL's source and rwarp, changed four things:
+
+- **Type conversion moved to its own operation, `Cast`** ([cast.md](cast.md)). Of each
+  variable's six output fields, three were an `astype`, with two options "required
+  when" the method and type needed them. Charles's test was whether the two are useful
+  apart. They are: a float warp needs no conversion, and an `astype` needs no warp.
+  gdalwarp converts at the end of its computation, so `Cast(Warp(x))` describes it.
+  `Warp` now writes only values that can't collide with its empty value, and `Cast`
+  states what happens on a collision, because gdalwarp nudges such values and on its
+  float path the rounding can undo the nudge.
+- **`Spherical` was split** into an area measure and an edge shape, as Mike suggested.
+  The edge shape went into `GeometryRules`, since containment for `Nearest` and
+  overlap for `Mode` depend on it too.
+- **The kernel's widening factor is stated in the plan.** gdalwarp estimates it per
+  processing chunk, so its output depends on the memory setting.
+- **`MidpointsBetweenCentres` is defined in the coordinates' own CRS,** with corners
+  at the mean of four centres. That's what gdalwarp's geolocation transformer does when
+  told the coordinates are centres.
+
 ## Questions for Mike
 
 Listed in [grids.md](grids.md#questions-for-mike): the grid reference, WKT2 or

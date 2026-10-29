@@ -98,9 +98,15 @@ Proposed on 28 October, designed in [grids.md](grids.md):
   not a change. Each grid concept is checked against at least one non-GDAL
   implementation (xgcm, SGRID, uxarray, xdggs) before it's agreed.
 - **`Warp` is an operation** ([warp.md](warp.md)), with every result-affecting option
-  explicit: resampling, output type and nodata for each variable, the edge rule and the
-  transformer's error threshold. Resampling methods are defined in ArrIR, not by any
-  adapter.
+  explicit: the resampling method and empty-cell value for each variable, the edge
+  rule, the cells' edge shape and the transformer's error threshold. Resampling methods
+  are defined in ArrIR, not by any adapter.
+- **`Cast` is an operation** ([cast.md](cast.md)), proposed. It converts a variable's
+  type with rounding, out-of-range handling and missing-value encoding stated. `Warp`
+  doesn't convert types; an adapter whose engine does both emits the pair as one call.
+- **An enum variant with options holds a named struct** (`Conservative(ConservativeOptions)`),
+  so each set of options has its own `impl` for validation. Fields are grouped into a
+  struct only when they describe one thing.
 
 ## Architecture
 
