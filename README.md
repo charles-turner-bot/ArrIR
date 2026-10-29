@@ -7,6 +7,13 @@
 
 See [`plans/`](plans/README.md) for the discussion context and design decisions.
 
+The repository is a Cargo workspace:
+
+- `crates/arrir-types`: shared value types, so far the portable symbol IDs
+  (`DimId`, `VarId`, `BindingId`, `GridId`).
+- `crates/arrir`: the IR. For now it holds only the scaffold, in `arrir::legacy`,
+  which the rest of this README describes.
+
 **ArrIR** is a small, portable intermediate representation for unary array-operation
 plans. It gives array libraries a common semantic core for operations such as selection,
 reduction and rechunking without requiring them to share a runtime, array engine, or API.
@@ -47,9 +54,9 @@ meaning is represented by the core.
 ## Development
 
 ```bash
-cargo test
+cargo test --locked
 cargo fmt --check
-cargo clippy --all-targets -- -D warnings
+cargo clippy --locked --all-targets -- -D warnings
 ```
 
 ## Extraction roadmap
