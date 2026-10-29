@@ -403,7 +403,9 @@ through a versioned schema change that maps old plans onto it exactly.
    is something else needed?
 2. WKT2 or PROJJSON as the stored form of `Crs.definition`?
 3. GCPs and RPCs: out of scope for now (rejected), or a fourth `GridModel` variant?
-4. Is byterefs' `affine` `start` a cell centre or a cell edge?
+4. Is byterefs' `affine` `start` a cell centre or a cell edge? GDAL's geolocation
+   arrays default to the corner (`GEOREFERENCING_CONVENTION=TOP_LEFT_CORNER`), so
+   a source that means centres has to say so.
 5. Do `Centre`, `Left`, `Right`, `Inner` and `Outer` cover the ocean models you use?
 
 ## Not settled

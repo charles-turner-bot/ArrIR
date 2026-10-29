@@ -64,17 +64,21 @@ All are proposed, pending Mike's answers. The details are in [grids.md](grids.md
 ## Known issues for the stacked PRs
 
 A review of the full draft, before it was split, found these. None changes the schema
-shapes proposed here. Each is fixed in the PR that designs the section it affects.
+shapes proposed here. Each is fixed in the PR that designs the section it affects, and
+that PR's copy of this note records how.
 
 ### Select on grids
 
-- **Strides on `Area` grids.** Multiplying the affine step by a stride greater than 1
-  makes each selected cell claim the cells skipped beside it. Selected cells no longer
-  tile, which an affine transform can't describe.
+Fixed in #21 (`design/grids-select`), in the "Select on a grid" section of grids.md:
+
+- **Strides on `Area` grids.** The draft multiplied the affine step by the stride and
+  kept the corner, so each selected cell claimed the cells skipped beside it, and the
+  samples moved. #21 keeps each sample's centre and widens each cell to `k` source
+  cells, which an affine transform describes.
 - **Reverse slices.** For a negative stride, the new origin is the far edge of the first
-  selected cell, not its original corner.
+  selected cell, not its original corner. #21's single origin formula covers this.
 - **Scalar indexers.** The draft said they keep their dimension. The contract says a
-  scalar indexer drops it.
+  scalar indexer drops it. #21 drops it and removes the placement.
 
 ### Warp
 
