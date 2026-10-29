@@ -103,8 +103,9 @@ Resolved in the `Warp` PR, in [warp.md](warp.md):
   `MidpointsBetweenCentres` implies edges, and has to be stated. Making `Nearest`
   invalid without bounds would block the common swath case, and implying edges
   silently would break purity rule 4.
-- **Each variable has its own output:** method, data type, rounding, out-of-range rule
-  and nodata. Variables not listed stay on the source grid. GDAL's one method for all
+- **Each variable has its own output:** at first its method, data type, rounding,
+  out-of-range rule and nodata; since Mike's answers, its method and empty-cell value,
+  with type conversion in `Cast` (below). Variables not listed stay on the source grid. GDAL's one method for all
   bands is a limit of that adapter, which emits one warp per method or rejects.
 - **The target geometry is a `GeometryBinding`,** a binding with a declared schema, as
   `Open` has. Validation checks it offline, and the host checks the real dataset when
@@ -115,7 +116,7 @@ A second review found three more gaps, also fixed there:
 - **`Mode` had no tie rule,** so an adapter had nothing to match. It's now an option,
   `ModeTie::Smallest` or `Largest`.
 - **"Invalid if an empty cell can happen" can't be checked offline.** It depends on the
-  data and on the geometry. So `target_nodata` is always required, and each variable
+  data and on the geometry. So an empty-cell value (now `empty_value`) is always required, and each variable
   declares its missing values in the logical schema. They can't come from the layout's
   `fill`, because `arrir` can't depend on `arrir-layout`.
 - **Comparing GDAL with GDAL can't show GDAL matches ArrIR's definitions.** Hand-worked
