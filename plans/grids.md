@@ -357,9 +357,10 @@ pub struct DggsGrid {
 pub enum CellIds {
     /// Every cell at the system's level, in index order: position i is cell i.
     All,
-    /// Evenly spaced IDs: position i is cell start + i * step. A slice of `All` or
-    /// `Range` gives a `Range`. In nested indexing, a consecutive range is often a
-    /// spatial patch.
+    /// Evenly spaced IDs: position i is cell start + i * step. Its length is the cell
+    /// dimension's size, so the last ID is start + (size - 1) * step; there's no stop.
+    /// A slice of `All` or `Range` gives a `Range`. In nested indexing, a consecutive
+    /// range is often a spatial patch.
     Range { start: u64, step: i64 },
     /// IDs stored in a coordinate variable on cell_dim, in any order: a regional or
     /// ocean-only subset.
