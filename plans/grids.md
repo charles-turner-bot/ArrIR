@@ -170,8 +170,11 @@ Validation rules for the models:
 - Each named variable is a numeric coordinate, placed on this grid at the entry's
   position or location. A rectilinear coordinate spans only its axis's dimension.
 
-- **Regularity is declared** (purity rule 8). Only `Affine` permits arithmetic shortcuts.
-  A rectilinear grid whose coordinates happen to be evenly spaced stays rectilinear.
+- **Regularity is declared** (purity rule 8). Among the horizontal models, only `Affine`
+  permits arithmetic shortcuts. A rectilinear grid whose coordinates happen to be evenly
+  spaced stays rectilinear. The planned DGGS kind is regular by declaration too: a
+  cell's geometry follows from its ID and the system's parameters (see
+  [Limits and extension plan](#limits-and-extension-plan)).
 - **The affine transform is always corner-anchored,** as in GDAL. A host whose
   coordinates are cell centres, such as xarray, converts with a half-step shift. That
   conversion is exact, so no adapter has to guess.
@@ -451,9 +454,23 @@ pub struct MeshGrid {
 
 pub struct DggsGrid {
     pub cell_dim: DimId,
-    /// The ID of each cell along cell_dim. A subset of cells is allowed.
-    pub cell_ids: VarId,
+    /// Which cell each position along cell_dim is.
+    pub cell_ids: CellIds,
     pub system: DggsSystem,
+}
+
+/// Declared like an affine transform where the IDs follow a rule, and stored only when
+/// they don't.
+pub enum CellIds {
+    /// Every cell at the system's level, in index order: position i is cell i.
+    All,
+    /// Evenly spaced IDs: position i is cell start + i * step. A slice of `All` or
+    /// `Range` gives a `Range`. In nested indexing, a consecutive range is often a
+    /// spatial patch.
+    Range { start: u64, step: i64 },
+    /// IDs stored in a coordinate variable on cell_dim, in any order: a regional or
+    /// ocean-only subset.
+    Listed(VarId),
 }
 
 pub enum DggsSystem {
