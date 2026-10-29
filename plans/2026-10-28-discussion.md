@@ -70,10 +70,16 @@ shapes proposed here. Each is fixed in the PR that designs the section it affect
 
 Resolved in the `Select` PR, in [grids.md](grids.md#select-on-a-grid):
 
-- **Strides on `Area` grids** remove the placement. The alternative, a cell extent
-  separate from the spacing, keeps decimated grids warpable but adds a field to every
-  affine grid. Striding before a warp is rare, since proper decimation averages, so
-  the simpler rule comes first. The extent can be added later without changing it.
+- **Strides keep the grid.** Each selected sample keeps its centre, and on an `Area`
+  grid each cell widens to `k` source cells. The first version removed the placement
+  instead, because the selected cells no longer tile. Mike's review rejected that,
+  since nothing requires a decimated grid to lose its georeferencing and it has to stay
+  warpable. Widening doesn't need the separate cell-extent field that was considered,
+  because the step is the extent. Writing out the arithmetic also found two errors in
+  the first version. Its `Point` origin, `x0 + s*dx` with step `k*dx`, moved every
+  sample by `(k-1)/2` cells. And it let `Left` and `Right` stay in step under a
+  stride, but their points are half a source cell from the centre, not on the faces of
+  the widened cells.
 - **Reverse slices** put the origin at `x0 + (s+1)*dx`, the far edge of the first
   selected cell, and negate the steps.
 - **Scalar indexers** drop their dimension and remove the placement, as the contract's

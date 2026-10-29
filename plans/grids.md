@@ -297,17 +297,22 @@ with `rx` and `dy` in place of `dx` and `ry`.
 
 | Slice | New origin | New steps | Placement |
 | --- | --- | --- | --- |
-| `k = 1` | `x0 + s*dx`, `y0 + s*ry` | unchanged | kept |
-| `k = -1` | `x0 + (s+1)*dx`, `y0 + (s+1)*ry` | `-dx`, `-ry` | kept |
-| `|k| > 1`, `Point` grid | as for `k = ±1` | `k*dx`, `k*ry` | kept |
-| `|k| > 1`, `Area` grid | | | removed |
+| any `k` | `x0 + (s + (1-k)/2)*dx`, `y0 + (s + (1-k)/2)*ry` | `k*dx`, `k*ry` | kept |
 
-- **The origin of a reversed slice is the far edge of its first cell.** The transform
-  stays corner-anchored, so the first selected cell, `s`, is now described from its
-  other side.
-- **A stride greater than 1 on an `Area` grid removes the placement.** The selected
-  cells no longer tile: each would claim the cells skipped beside it, which it never
-  covered. A `Point` grid has no cells to tile, so only its spacing changes.
+- **Each selected sample keeps its centre.** Cell `s + i*k` was centred at
+  `x0 + (s + i*k + 0.5)*dx`. The new transform puts new cell `i` there. For `k = 1` the
+  origin is `x0 + s*dx`. For `k = -1` it's `x0 + (s+1)*dx`, the far edge of the first
+  selected cell, because the transform stays corner-anchored.
+- **A stride widens the cells of an `Area` grid.** With `|k| > 1`, each selected cell
+  stands for a cell `k` times as wide, centred on its sample. This reinterpretation is
+  part of `Select`'s stated effect. It isn't an approximation an adapter makes. The
+  grid stays affine, so a decimated variable can still be warped. Values aren't
+  changed: a stride picks samples, and averaging is `Warp`'s job.
+- **With an even stride, the outer cells overhang.** With `s = 0` and `k = 4`, the first
+  new cell starts 1.5 source cells before the source's edge. The extent grows by up to
+  `(|k| - 1)/2` cells on each side.
+- **A `Point` grid follows the same arithmetic.** Its samples keep their positions and
+  only the spacing changes.
 - **An empty result keeps the placement and the transform.** With no cells, the
   transform describes nothing, and any value would do. Keeping it avoids a special case.
 
@@ -336,10 +341,13 @@ that position that belong to the selected cells, in the same order:
 | `Inner` | `N - 1` | the `M - 1` faces between the selected centres |
 | `Outer` | `N + 1` | the `M + 1` edges of the selected cells |
 
-For `|k| > 1`, only `Centre`, `Left` and `Right` can be in step, by selecting with the
-same `s` and `k`, and only on a `Point` grid. Variables staggered at `Inner` or
-`Outer` lose their placement, because the faces between strided cells aren't in the
-source.
+For `|k| > 1`, only `Centre` can be in step, by selecting with the same `s` and `k`.
+`Left` and `Right` points are half a source cell from their centres, but the widened
+cells' faces are `k/2` source cells away, so those points no longer sit on a face.
+`Inner` and `Outer` points between the strided cells aren't in the source. All four
+lose their placement. On a rectilinear or curvilinear grid this removes the bounds,
+so a later `Warp` needs `EdgeRule::MidpointsBetweenCentres`. For an evenly spaced
+rectilinear grid, the midpoints are the same widened cells as on an affine one.
 
 A variable staggered on the centre dimension itself, as NEMO does, is always in step,
 since it's sliced with the centres.
@@ -504,16 +512,14 @@ through a versioned schema change that maps old plans onto it exactly.
 3. GCPs and RPCs: out of scope for now (rejected), or a fourth `GridModel` variant?
 4. Is byterefs' `affine` `start` a cell centre or a cell edge?
 5. Do `Centre`, `Left`, `Right`, `Inner` and `Outer` cover the ocean models you use?
-6. Is the "in step" table for staggered dimensions right for MOM-style files? And is
-   removing the placement on a strided `Area` grid acceptable, or do decimated grids
-   need to stay warpable (see Not settled)?
+6. Is the "in step" table for staggered dimensions right for MOM-style files?
+7. A stride now keeps the grid, by widening each cell around its sample. Is that what
+   a decimation should mean? A decimation is then arithmetic on the transform and a
+   slice of the coordinate arrays, and a later `Warp` does any averaging.
 
 ## Not settled
 
 - Staggering on vertical axes (`w` at layer interfaces). The same `AxisPosition` would
   fit, but vertical axes aren't part of a grid.
-- Strided `Area` grids. Keeping them on a grid would need a cell extent separate from
-  the spacing: cells `dx` wide, `k*dx` apart. That can be added later without changing
-  today's grids, whose extent equals their spacing.
 - CF bounds whose neighbouring cells don't share edges. The `Outer` form can't hold
   them, so for now host lowering drops them.
