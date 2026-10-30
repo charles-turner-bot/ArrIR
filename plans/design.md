@@ -244,7 +244,8 @@ do not omit a semantic field or its tests to satisfy the line count.
 2. A workspace with `arrir-types` and `arrir`. Distinct dimension, variable and
    external-binding IDs go in `arrir-types`, with serde tests and CI. The legacy
    scaffold moves to `arrir::legacy`.
-3. Logical schema in `arrir-types`: variable dimensions, coordinate roles, and
+3. Logical schema in `arrir-types` (proposed detail in
+   [schema-and-values.md](schema-and-values.md)): variable dimensions, coordinate roles, and
    known/unknown sizes, with small invariant tests. #16's `ArraySchema` is the starting
    point, widened to a dataset. Then, in separate PRs: grids, CRS and pixel
    interpretation, and staggered placements, as in [grids.md](grids.md).
