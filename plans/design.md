@@ -252,7 +252,8 @@ do not omit a semantic field or its tests to satisfy the line count.
    separate PRs. Preserve source distinctions used by rewrite proofs.
 5. A deliberately bounded reduction specification with explicit result options;
    reject anything outside that supported subset.
-6. Reduce and Select operation structs, each with its effects (purity rule 3), then the
+6. Reduce and Select operation structs, each with its effects (purity rule 3; `Select`'s
+   effects on grids are in [grids.md](grids.md#select-on-a-grid)), then the
    linear plan starting with `Open`, and structural validation, split into
    independently understandable PRs. Footprints, the other half of rule 3, come later
    but before any physical planning. Until an operation has one, it can't be physically
