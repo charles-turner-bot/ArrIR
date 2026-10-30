@@ -282,8 +282,11 @@ because it names a pattern for a whole model, not where one variable sits.
 Validation rules:
 - The `Location` variant matches the grid's `GridKind` variant.
 - `dim` has the length its `position` implies, whenever both lengths are known.
-- A variable spanning both of a grid's centre dimensions, with no placement, is
-  rejected. A variable that is gridded must say so.
+- A source declaring a variable gridded must record its placement, not silently drop it.
+  A Select can explicitly remove it and leave an ordinary variable, even when both
+  dimensions remain (see [Select on a grid](#select-on-a-grid)). The proposed
+  [schema contract](schema-and-values.md#spatial-state-is-not-an-optional-placement)
+  distinguishes ungridded from unresolved placement.
 - A variable that is placed on a grid must also span the placement's two dimensions.
 
 ## Select on a grid
