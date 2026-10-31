@@ -47,6 +47,9 @@ so that it agrees with the label rule below.
 ## Decisions
 
 - Start with linear unary chains, not a speculative graph.
+  *Proposed change, 31 October, pending review:* a plan is an append-only DAG of nodes
+  with ordered inputs and one root, as in [dag.md](dag.md). A chain is the special case,
+  so the first vertical slice keeps its content.
 - Extract xrexpr's **lowered** operations, not its fluent call recorder.
   `ContextOpen` belongs in host lowering; contextual reductions are semantic nodes.
 - Keep one semantic algebra. Rewrites consume it, not a competing optimiser IR.
@@ -254,7 +257,8 @@ do not omit a semantic field or its tests to satisfy the line count.
    reject anything outside that supported subset.
 6. Reduce and Select operation structs, each with its effects (purity rule 3; `Select`'s
    effects on grids are in [grids.md](grids.md#select-on-a-grid)), then the
-   linear plan starting with `Open`, and structural validation, split into
+   linear plan starting with `Open` (a node arena if [dag.md](dag.md) is approved),
+   and structural validation, split into
    independently understandable PRs. Footprints, the other half of rule 3, come later
    but before any physical planning. Until an operation has one, it can't be physically
    planned. `Warp` follows in its own PR, as in [warp.md](warp.md).
