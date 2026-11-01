@@ -226,7 +226,8 @@ A label `Select` stays representable without coordinates (design.md, purity rule
   `BoolArray` indexers act like position lists and masks: they remove every placement
   on that grid. Pointwise mode removes the placements of every grid with an axis
   indexed by an array; an axis indexed only by a slice transforms its grid as usual.
-  An unresolved label leaves the grid `Unresolved` (#26).
+  A non-scalar label on a grid's dimension leaves that grid's placements `Unresolved`
+  until label resolution; a scalar label drops the axis and gives `Ungridded`.
 
 ## Pushdown rules for #37
 

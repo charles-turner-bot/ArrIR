@@ -308,7 +308,8 @@ so it reaches an elementwise node as `Project::Array`.
     give the same origin. Merging the selections of one operand only, as #37 may, then
     can't change the output schema.
 - **Grids.** The output's `SpatialState` is `Unresolved` if any operand's is. Placed
-  operands must have equal grid definitions; unequal ones are rejected, as
+  operands must have equal grid definitions ([grids.md](grids.md#grid-equality));
+  unequal ones are rejected, as
   [dag.md](dag.md#id-scope-across-opens) requires. Equal definitions at one location give
   `Placed` on the first placed operand's grid. Different locations are
   `GridLocationMismatch` (decision 10): only `Select` drops a placement
