@@ -58,7 +58,8 @@ pub struct WarpTarget {
     pub sizes: Vec<(DimId, u64)>,
     /// Where the target's coordinate variables come from, when its model refers to
     /// any: a rectilinear or curvilinear grid, a mesh, or a DGGS cell list. An
-    /// affine target needs none.
+    /// affine target needs none. Decided 1 November (dag.md decision 7): this
+    /// becomes an `Open` input to `Warp` when Warp is implemented, rather than a field.
     pub geometry: Option<GeometryBinding>,
 }
 

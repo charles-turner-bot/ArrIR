@@ -1,10 +1,10 @@
 # Dtype inference, promotion and accumulation
 
-Status: proposal, 31 October 2026, for issue #30. Pending review. Nothing here is
-implemented; #31 implements it after review.
+Status: decided 1 November 2026, for issue #30 (proposed 31 October). Nothing here is
+implemented yet; #31 implements it.
 
 It uses the `DType`, `Scalar` and `TypeKnowledge` types proposed in PR #26
-(`plans/schema-and-values.md`) and the node graph in [dag.md](dag.md) (PR #45). It adds
+(`plans/schema-and-values.md`) and the node graph in [dag.md](dag.md). It adds
 no schema types.
 
 Reference: [Array API 2025.12](https://data-apis.org/array-api/2025.12/), its
@@ -159,7 +159,7 @@ pub struct Constant {
   `missing: Known { values: [], nan_is_missing }`. VarIds are scoped to one node's
   schema ([dag.md](dag.md)), so the fixed name can't collide with an operand's
   variable. How an elementwise result names its variable is #32's rule. The constant
-  broadcasts against any shape (`plans/shapes.md`, PR #46).
+  broadcasts against any shape ([shapes.md](shapes.md)).
 - **NaN.** A NaN constant states whether it is missing. Xarray treats NaN as missing,
   so its lowering writes `true`. Array API has no missingness, so its lowering writes
   `false`. How missing operands propagate is #39's.
@@ -393,46 +393,51 @@ obligations and have no promotion today.
 - Missing-value propagation (#39).
 - The `var`/`std` formula.
 
-## Questions for review
+## Decisions
 
-Each question has a recommendation.
+Charles decided question 3 directly, and accepted the recommendation on every other
+question on 1 November 2026.
 
-1. **Mixed kinds.** *Recommended:* reject int/float and bool/number promotion in ArrIR,
+1. **Mixed kinds.** *Decided:* reject int/float and bool/number promotion in ArrIR,
    and have lowering write its host's rule as `Cast`s. The cost is noisier plans, and a
    plan is no longer a one-to-one echo of the host expression. Adopting NumPy's
    mixed-kind table would make ArrIR NumPy-shaped.
-2. **Same-kind widening.** *Recommended:* allow exact widening inside operations. The
+2. **Same-kind widening.** *Decided:* allow exact widening inside operations. The
    alternative requires equal operand dtypes and a `Cast` for every widening.
 3. **Accumulator and result.** *Decided by Charles, 1 November:* a separate `result`
    field, so "accumulate in `f64`, return `f32`" is one node. The final conversion reuses
    cast.md's narrowing rule and its `OutOfRange` enum rather than defining its own.
-   Open part: are the two allowed accumulator/result pairs enough?
-4. **Strict order inside reductions.** *Recommended:* design.md's strictness applies
+   The two allowed accumulator/result pairs are enough for now (accepted 1 November).
+   Another pair needs its own decision.
+4. **Strict order inside reductions.** *Decided:* design.md's strictness applies
    inside reductions. `Sequential` is the strict order, and lowering from NumPy, xarray
    and dask writes `Unspecified` explicitly, because those hosts promise nothing. The
    alternative declares reductions exempt from the rule.
-5. **One principle for relaxations.** *Recommended:* permissions, not tolerances. A plan
+5. **One principle for relaxations.** *Decided:* permissions, not tolerances. A plan
    relaxes something only through a named variant, as `Unspecified` does for order.
    Accumulators are exact, and adapters never apply a tolerance. Fixtures compare
    results with a tolerance only between engines inside a permitted set. The
    alternative is a stated numerical tolerance per plan, covering both accumulator
    width and order.
-6. **Constants.** *Recommended:* a zero-input `Constant { value, nan_is_missing }` node.
+6. **Constants.** *Decided:* a zero-input `Constant { value, nan_is_missing }` node.
    The alternative is a scalar operand field on each elementwise operation.
-7. **Bool accumulators.** *Recommended:* keep `bool` to integer as an exact
+7. **Bool accumulators.** *Decided:* keep `bool` to integer as an exact
    accumulator conversion, so `sum` of a mask needs no `Cast`.
-8. **The constant's variable.** *Recommended:* a fixed `VarId` `constant` in the
+8. **The constant's variable.** *Decided:* a fixed `VarId` `constant` in the
    constant's own schema. The alternative is a host-chosen `VarId` on `Constant`, which
    would carry a name such as xarray's `DataArray(2, name="k")` but adds a field almost
    nobody uses.
-9. **Unverified GDAL cells.** cast.md's GDAL table marks float narrowing's
-   `OutOfRange::Infinity` as unverified, and cast.md and gdal-adapter.md currently say
-   such cells are rendered and settled later by the #42 meaning fixture. The options:
-   - **Render now** (as the docs say). `Warp` + `Cast(f32)` and standalone float casts
+9. **Unverified GDAL cells.** cast.md's GDAL table marked float narrowing's
+   `OutOfRange::Infinity` as unverified. The docs first said such cells are rendered
+   and settled later by the #42 meaning fixture. The options were:
+   - **Render now**. `Warp` + `Cast(f32)` and standalone float casts
      keep working, but a plan could be rendered with semantics nobody has checked,
      which is in tension with purity rule 4.
    - **Reject until the #42 fixture confirms the cell.** This honours purity rule 4, at
      the cost of every `float32` output from GDAL until the fixture lands.
 
-   *Recommended:* reject until the fixture. If that's chosen, the two docs change to
-   match.
+   *Decided:* reject the unverified cells. An experiment on 1 November (GDAL 3.13.3)
+   then resolved them: gdalwarp and warped VRTs overflow to infinity, so `Warp` +
+   `Cast(f32)` renders with `Infinity`. GDAL's ordinary conversion clamps infinities as
+   well, which no `OutOfRange` variant describes, so a standalone `Cast` to `float32` is
+   rejected. Details are in [cast.md](cast.md#what-gdalwarp-can-emit).

@@ -1,8 +1,8 @@
 # Plans as DAGs
 
-Status: proposal, 31 October 2026, for issue #27. Pending review. It replaces the
-"start with linear unary chains" decision in [design.md](design.md#decisions) only if
-approved. Nothing here is implemented.
+Status: decided 1 November 2026, for issue #27 (proposed 31 October). It replaces the
+"start with linear unary chains" decision in [design.md](design.md#decisions). Nothing
+here is implemented yet; #28 implements it.
 
 ## Why a chain isn't enough
 
@@ -70,11 +70,10 @@ illustrative: design.md's extraction table lists `Open`, `Project`, `Select`, `R
 `Scan`, `Rename`, `Drop` and `Rechunk`, and the proposals add `Warp`, `Cast` and #32's
 elementwise family. Operations hold their options; nodes hold the edges. A node's ID is
 its position, so it isn't stored in the node. Array data is never embedded: inputs are
-other nodes, and *external* data enters only through `Open` (and, until [question
-7](#questions-for-review) is settled, `Warp`'s `GeometryBinding`). A literal scalar,
-such as the `2` in `a * 2`, is a zero-input node with no binding. A zero-input literal
-node is proposed in #47 (dtypes.md). This contract only allows such nodes; it doesn't
-decide them.
+other nodes, and *external* data enters only through `Open`. `Warp`'s target geometry
+is an `Open` input too ([decision 7](#decisions)). A literal scalar, such as the `2` in
+`a * 2`, is a zero-input `Constant` node with no binding, defined in
+[dtypes.md](dtypes.md).
 
 **Who owns the nodes.** A `Graph` owns them. A rewrite takes `&mut Graph` and a root,
 appends to the graph in place, and returns a new root. No existing node is changed or
@@ -99,14 +98,16 @@ pairs the graph with the one root being exported or executed.
    }
    ```
 
-   `Open` is `Exactly(0)`, as is a literal node (#47, dtypes.md). `Project`, `Cast` and
+   `Open` is `Exactly(0)`, as is a `Constant` ([dtypes.md](dtypes.md)). `Warp` is
+   `Exactly(1)`, or `Exactly(2)` when its target geometry is an `Open` input. `Project`,
+   `Cast` and
    an unweighted `Reduce` are `Exactly(1)`; a weighted `Reduce` is `Exactly(2)`, its
    weights being the second input. A `Select` takes one input plus one per array-valued
    indexer, such as a computed mask (#36). A binary elementwise function is
    `Exactly(2)`, and a future `Concat` is `AtLeast(1)`. The input count must match.
 4. **One root per plan.** A plan computes one result, the value of `root`. Several
    results share work by being several roots in one graph (see
-   [questions](#questions-for-review)).
+   [decisions](#decisions)).
 5. **Sharing is explicit.** `Add` with inputs `[1, 1]` uses one value twice. Operations
    are pure, so an adapter may evaluate a shared node once or twice; how often is
    execution policy, not meaning.
@@ -224,7 +225,7 @@ Neither #15 nor #26 says how far a `DimId`, `VarId` or `GridId` reaches. With on
 `Open` it didn't matter. With two, both datasets can have a `time` dimension and a
 `temp` variable, and the plan has to say whether they're the same thing.
 
-**Recommendation: named dimensions are plan-wide; variables and grids are per schema.**
+**Decision: named dimensions are plan-wide; variables and grids are per schema.**
 
 - **`DimId` is plan-wide, for named axes.** An axis is `AxisName::Named(DimId) |
   Positional`, as #46 defines. The same `DimId` on named axes in two `Open`s names one
@@ -289,9 +290,9 @@ alignment adds selection nodes on 2 and 3 that bring `time` to the matched label
 the add. If `model`'s `time` were lead time, the host would lower it as `lead`, and the
 add would give `(time, lat, lead)` under #46's named rules.
 
-`Warp`'s target geometry is a `GeometryBinding` field in [warp.md](warp.md). It's a
-declared requirement on external geometry, not a value computed in the plan. Question 7
-recommends making it an `Open` input.
+[warp.md](warp.md) first gave `Warp`'s target geometry as a `GeometryBinding` field.
+Decision 7 makes it an `Open` input instead, so `Open` is the only way external data
+enters a plan.
 
 ## Python table or Rust arena
 
@@ -306,7 +307,7 @@ The issue asks whether the graph should be an immutable Python node table or a R
 | Determinism and serde | Per host | One implementation, fixture-tested |
 | Learning cost here | None in Rust | An ordinary `Vec` and index type |
 
-**Recommendation: the Rust arena is the plan.** Hosts keep their own expression
+**Decision: the Rust arena is the plan.** Hosts keep their own expression
 objects and lower them by calling `Graph::append`, which returns a `NodeId` for each
 node. A Python list of node records that mirrors the wire format is fine as interchange,
 but it isn't a second validator. The arena needs no lifetimes or pointers: a node refers
@@ -460,47 +461,48 @@ Wire rules:
 
 No scheduler, evaluation order, kernels, memoisation or embedded data. No elementwise
 vocabulary (#32), broadcasting (#29, #46), dtype rules (#30) or label alignment
-(#34). The implementation is #28, after review; compaction is later still.
+(#34). The implementation is #28; compaction is later still.
 
-## Questions for review
+## Decisions
 
-Each has a recommendation.
+Each question was proposed with a recommendation. Charles accepted all of them on
+1 November 2026.
 
 1. **Sequencing.** Replace "linear unary chains first" now, so #28 builds the arena
-   before the first vertical slice? Recommended: yes. The slice's content doesn't
+   before the first vertical slice? Decided: yes. The slice's content doesn't
    change, only its container.
-2. **Where inputs live.** Recommended: an ordered `inputs` list on the node, with arity
+2. **Where inputs live.** Decided: an ordered `inputs` list on the node, with arity
    checked per operation value. The alternative is named fields on each operation
    (`Add { left, right }`), which can't be misordered but needs a per-operation match
    for every traversal.
-3. **Node IDs.** Recommended: a dense `u32` graph index. The alternative is host-chosen
+3. **Node IDs.** Decided: a dense `u32` graph index. The alternative is host-chosen
    string IDs, which need uniqueness checks and a lookup table, and lose the
    cycle-free-by-construction property.
-4. **One root.** Recommended: one root per plan, with several results as several roots
+4. **One root.** Decided: one root per plan, with several results as several roots
    in one graph. The alternative is a list of named roots in the plan itself. Either
    way, rule 6 holds across every root a host binds together, not just per root.
-5. **Duplicate bindings (c).** Recommended: check rule 6 over live nodes only, so a
+5. **Duplicate bindings (c).** Decided: check rule 6 over live nodes only, so a
    rewrite can append a replacement `Open`. The stricter alternative counts dead nodes
    too, and bars rewrites from appending an `Open` for a binding already opened.
-6. **Dead nodes on the wire.** Recommended: allow them, keeping compaction optional and
+6. **Dead nodes on the wire.** Decided: allow them, keeping compaction optional and
    out of #28. The alternative compacts at every export, which moves compaction into
    #28.
-7. **Warp geometry (b).** Recommended: turn the target geometry into an `Open` input
+7. **Warp geometry (b).** Decided: turn the target geometry into an `Open` input
    to `Warp`. It removes the case where one binding is declared by both an `Open` and a
    `GeometryBinding`, which rule 6 doesn't cover, lets geometry be computed, and leaves
    `Open` as the only way external data enters. The alternative keeps the field and
    extends rule 6 to it.
-8. **ID scope.** Recommended: plan-wide `DimId` for named axes, with `VarId` and
+8. **ID scope.** Decided: plan-wide `DimId` for named axes, with `VarId` and
    `GridId` scoped to one node's schema, and renaming at lowering for distinct axes that
    share a name. Positional axes carry no ID (#46). The
    alternative is per-`Open` scope for everything, with an explicit mapping operation
    wherever two datasets meet.
-9. **Dimensions across grids (a).** Recommended: a shared `DimId` asserts axis
+9. **Dimensions across grids (a).** Decided: a shared `DimId` asserts axis
    identity even when its grids' definitions differ, and combining such inputs is
    rejected until a `Warp` makes them agree; warp.md lets the target reuse the source
    grid's dimension names. The alternatives are a `Rename` before the `Warp`, so the
    target needs no reused names, or that each grid owns its dimensions, so dimensions
    on differently defined grids must always have different names.
-10. **Integer encoding.** Recommended: `NodeId` as a JSON number and 64-bit values as
+10. **Integer encoding.** Decided: `NodeId` as a JSON number and 64-bit values as
     decimal strings. The alternative is decimal strings for all integers, which the #26
     review suggested; this proposal follows whichever rule #26 settles.

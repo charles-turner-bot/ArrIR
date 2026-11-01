@@ -43,7 +43,11 @@ multidimensional dataset.
 - **A warp with several resampling methods** renders as one warped VRT per method,
   each over the variables that use it, combined as below.
 - **A `Warp` followed by a `Cast`** of the same variable renders as one warp, with the
-  cast's type and nodata. A `Cast` alone renders as a VRT band's data type.
+  cast's type and nodata. A `Cast` alone renders as a VRT band's data type. Narrowing
+  to `float32` renders after a `Warp` (one gdalwarp call or a warped VRT, with
+  `Infinity`), but a standalone `Cast` that narrows to `float32` is rejected: GDAL's
+  ordinary conversion clamps infinities too, which no `OutOfRange` variant describes
+  ([cast.md](cast.md#what-gdalwarp-can-emit), verified with GDAL 3.13.3).
 
 ## Output
 
@@ -118,8 +122,9 @@ These settings are always written, so no gdalwarp default decides a result:
   kernel may be cut at chunk edges.
 - A `Cast` whose rounding, out-of-range and collision rules aren't a row of
   [cast.md's table](cast.md#what-gdalwarp-can-emit). A `Cast` with no warp uses GDAL's
-  ordinary conversion, which gives the table's two "ordinary conversion" rows. Cells
-  marked unverified are rendered, and the meaning check below settles them.
+  ordinary conversion, which gives the table's two "ordinary conversion" rows. A
+  standalone `Cast` that narrows to `float32` is rejected, because that conversion
+  clamps infinities (verified 1 November with GDAL 3.13.3).
 - A plan whose output variables don't fit one classic dataset (see [Output](#output)).
 
 ## Done when

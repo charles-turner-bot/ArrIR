@@ -16,7 +16,7 @@ writing a chain type and then replacing it.
 
 ## Proposed
 
-Details in [dag.md](dag.md). All pending review.
+Details in [dag.md](dag.md). Decided 1 November (see [below](#1-november-decisions)).
 
 - **Append-only arena, inputs point backwards.** Node IDs are positions, and every
   input is an earlier node, so cycles can't be written and validation is one pass.
@@ -40,7 +40,7 @@ Details in [dag.md](dag.md). All pending review.
 
 ## Symbolic shapes (#29)
 
-Details in [shapes.md](shapes.md). All pending review.
+Details in [shapes.md](shapes.md). Decided 1 November (see [below](#1-november-decisions)).
 
 - **Unknown extents get identities.** `Extent` gains `Symbolic`. Hosts still declare
   `Unknown`; inference turns each one into a size symbol, so `a + a` is provably
@@ -57,7 +57,7 @@ Details in [shapes.md](shapes.md). All pending review.
   a named operand's names but may not stretch a named length-1 axis. Decided by
   Charles, 1 November, after xarray experiments. Named shapes therefore need no
   `expand_dims`. Coordinate label alignment stays with #34. Whether any Broadcast node
-  is needed is still a recommendation (no).
+  is needed was settled on 1 November: none for now.
 - **Unresolved isn't an error.** A pair that can't be proven compatible records a
   requirement. The core checks it when its facts arrive: at bind, at label resolution
   or at execution. Rewrites must keep the requirement set's meaning, compared as
@@ -66,7 +66,7 @@ Details in [shapes.md](shapes.md). All pending review.
 
 ## Dtypes (#30)
 
-Details in [dtypes.md](dtypes.md). All pending review.
+Details in [dtypes.md](dtypes.md). Decided 1 November (see [below](#1-november-decisions)).
 
 - **Implicit promotion only where it is exact.** The Array API 2025.12 table is used for
   the pairs it defines. Mixed kinds and `u64` with a signed integer are rejected, and
@@ -87,10 +87,35 @@ Details in [dtypes.md](dtypes.md). All pending review.
   conversion of a variable with missing values.
 - **No `Promote` node.**
 
-Open questions are at the end of [dtypes.md](dtypes.md).
+Its decisions are at the end of [dtypes.md](dtypes.md#decisions).
 
-## Not settled
+## 1 November: decisions
 
-The questions at the end of [dag.md](dag.md), [shapes.md](shapes.md) and
-[dtypes.md](dtypes.md), and the
-rewrite termination measure for graphs, which goes to #37.
+Charles settled every open question in the three designs and the coverage audit. He
+decided some directly and accepted the recommendation on the rest:
+
+- **Plans are DAGs** ([dag.md](dag.md#decisions)). This replaces "start with linear
+  unary chains" in [design.md](design.md#decisions). `Warp`'s target geometry becomes
+  an `Open` input, so `Open` is the only way external data enters a plan.
+- **Broadcasting** ([shapes.md](shapes.md#decisions)). Charles decided this directly,
+  after xarray experiments. Axes are named or positional, only positional axes stretch,
+  and named shapes align by name. There is no `Broadcast` node for now.
+- **Dtypes** ([dtypes.md](dtypes.md#decisions)). Charles decided directly that reductions
+  carry a separate `result` dtype. Mixed kinds are rejected, and reductions declare their
+  order with no default.
+- **GDAL float narrowing**: unverified cells are rejected, under purity rule 4. An
+  experiment with GDAL 3.13.3 then verified them. gdalwarp overflows to infinity, so
+  `Warp` + `Cast(f32)` renders. Ordinary conversion clamps infinities too, so a
+  standalone `Cast` to `float32` is rejected
+  ([cast.md](cast.md#what-gdalwarp-can-emit)).
+- **Array API coverage** ([array-api-coverage.md](array-api-coverage.md#decisions)).
+  `where` joins #32's `Elementwise` family, and `concat` is the first new primitive.
+  Complex dtypes stay deferred.
+
+## Still open
+
+- The rewrite termination measure for graphs, which goes to #37.
+- A #42 fixture that encodes the GDAL narrowing cases, so a GDAL upgrade that changes
+  them is caught.
+- The schema in #26: it needs `Extent::Symbolic`, and axes that are named or positional,
+  before dtypes.md's link to `schema-and-values.md` resolves.
