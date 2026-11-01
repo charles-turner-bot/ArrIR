@@ -267,7 +267,8 @@ A label `Select` stays representable without coordinates (design.md, purity rule
 
 - **Modes their host can't express exactly.** An xarray adapter emits pointwise mode
   as vectorised `isel` with a transpose when `insert_at` differs from xarray's placement.
-  GDAL takes positional `Scalar` and `Slice` only (gdal-adapter.md).
+  GDAL takes `Scalar` on non-grid dimensions and `Slice` with step +1 only
+  ([gdal-adapter.md](gdal-adapter.md#the-first-subset)).
 - **Computed integer indexers on engines that don't raise on out-of-range positions.**
   The Array API leaves this unspecified, and some libraries clamp or fill. The adapter
   rejects unless it can emit an explicit check that raises `PositionOutOfRange`.

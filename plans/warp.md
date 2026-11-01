@@ -5,8 +5,8 @@ Status: decided 1 November 2026, after review (see
 [the extraction contract](design.md). It follows the decided [dag.md](dag.md),
 [schema-and-values.md](schema-and-values.md) and [cast.md](cast.md). Its grid concepts
 (models, placements, `PixelInterpretation`, Select on a grid) come from
-[grids.md](grids.md), which is still proposed; a change there may change this doc. The
-earlier reasoning is in [the 28 October discussion](2026-10-28-discussion.md).
+[grids.md](grids.md). The earlier reasoning is in
+[the 28 October discussion](2026-10-28-discussion.md).
 
 ## Summary
 
@@ -119,7 +119,10 @@ weight, reads as missing. That is stated, not silent.
 
 An integer variable with no sentinel (`Known { values: [], nan_is_missing: false }`)
 has no legal `empty_value` for `Nearest` or `Mode`, and a `Cast` can't add one, since a
-same-dtype cast has no node. Such a warp is rejected (decision 5).
+same-dtype cast has no node. Such a warp is rejected (decision 5). A `bool` variable
+can't be warped at all for now: it has no missing values
+([cast.md](cast.md#missing-values)) and isn't float, so no method has a legal
+`empty_value`.
 
 Choosing which value marks an empty cell after a later conversion to an integer type,
 and what happens when a converted value collides with it, is `Cast`'s job.
@@ -196,7 +199,9 @@ pub enum EdgeRule {
     /// Use the grid's bounds: by arithmetic for `Affine`, or its `Outer` coordinates.
     /// CF bounds variables never count; they stay ordinary auxiliary coordinates
     /// ([grids.md](grids.md#decisions)). A grid without bounds is invalid for a
-    /// method that needs edges.
+    /// method that needs edges. After a `Select` with `|k| > 1`, a curvilinear grid
+    /// keeps only its `Centre` entry ([grids.md](grids.md#staggered-dimensions)), so
+    /// it has no `Outer` bounds and needs `MidpointsBetweenCentres`.
     FromBounds,
     /// Derive corners from centres, in the coordinates' own CRS: a corner is the mean
     /// of the four centres around it, and the outer corners extrapolate linearly. In a
@@ -308,16 +313,22 @@ Valid ranges (CF's `valid_min`, `valid_max` and `valid_range`) aren't covered ye
   inserted where the first of the old ones was. A `(time, row, column)` variable warped
   to a mesh becomes `(time, face)`. Its data type becomes the method's output type. Its
   missing values become `Known { values: [], nan_is_missing: true }` when
-  `empty_value` is NaN, and `Known { values: [empty_value], nan_is_missing: false }`
-  otherwise.
+  `empty_value` is NaN, `Known { values: [empty_value], nan_is_missing: true }` for a
+  float variable with a sentinel `empty_value`, and
+  `Known { values: [empty_value], nan_is_missing: false }` for an integer one. A float
+  output keeps `nan_is_missing: true`, so it can be warped again (decision 3).
 - The target grid enters the schema, with its coordinate variables from the model or
   from the geometry input, as `target.coordinates` says. Only the listed coordinates
   are taken from that input. Warped variables are placed on the target grid at its
   primary location: `Centre` on both axes for `Horizontal`, a face for `Mesh`, a cell
   for `Dggs`.
+- The target grid's rectilinear or curvilinear coordinates have no origin
+  ([elementwise.md](elementwise.md)), so such a grid equals no other grid, even one
+  from another warp to the same target ([grids.md](grids.md#grid-equality)). An
+  `Affine` target compares by its definition.
 - Variables on `source_grid` that aren't listed stay where they are. The source grid and
   its coordinate variables are dropped once no data variable is placed on it, by
-  grids.md's general rule that a grid with nothing placed on it is removed
+  grids.md's general rule that a grid with no data variable placed on it is removed
   ([grids.md](grids.md#decisions), decision C). A target that reuses the source grid's
   names requires this (see [Validation](#validation)).
 - When the source grid is dropped, any other variable that spans one of its dimensions
@@ -339,7 +350,8 @@ Valid ranges (CF's `valid_min`, `valid_max` and `valid_range`) aren't covered ye
 - Each `empty_value` has the method's output type, and is NaN or a declared sentinel
   as above. An integer variable with no sentinel can't be warped with `Nearest` or
   `Mode`.
-- A `bool` variable can't use `Interpolate` or `Conservative`.
+- No listed variable is `bool`
+  (see [Output type and empty cells](#output-type-and-empty-cells)).
 - `Widen` factors are in (0, 1]. `error_threshold` is finite and ≥ 0.
 - `Mode` and `Conservative` need `PixelInterpretation::Area` on both grids.
 - Both grids have a spatial reference: a `crs`, or a DGGS system.
@@ -354,7 +366,9 @@ Valid ranges (CF's `valid_min`, `valid_max` and `valid_range`) aren't covered ye
   axes as `model`'s. If any variable stays on the source grid, the names would name two
   grids' axes in one schema, so the warp is rejected; warp the remaining variables too,
   or `Rename` first.
-- `sizes` gives exactly the target grid's dimensions, once each.
+- `sizes` gives exactly the target grid's dimensions, once each, including any
+  staggered dimension its model's entries use (an `Outer` dimension has `N + 1`
+  points).
 - An `Affine` target declares `IndexMap { offset: 0, step: 1 }` on both axes, as any
   newly declared grid does ([grids.md](grids.md#grid-models)).
 - **The geometry input:**
@@ -362,13 +376,16 @@ Valid ranges (CF's `valid_min`, `valid_max` and `valid_range`) aren't covered ye
     `target.coordinates` lists exactly the coordinate variables the target model names.
   - It is a `Dataset` that has every `from_input` variable, each numeric with a known
     dtype.
-  - Each such variable spans the target grid's dimensions, by `DimId`, with `Known`
-    extents equal to `sizes`. `VarId`s are per node, so only the `output` names enter
-    the output schema, and they follow the collision rule above.
+  - Each such variable has the dimensions its model entry's placement implies, by
+    `DimId`, with `Known` extents equal to `sizes`: both centre dimensions for a
+    curvilinear `Centre` entry, one axis's dimension for a rectilinear coordinate, and
+    the staggered dimensions for an `Outer` (bounds) entry. `VarId`s are per node, so
+    only the `output` names enter the output schema, and they follow the collision
+    rule above.
 - A method that needs edges has them, from bounds or from `cells.edges`.
-- When the source grid's `SpatialState` is `Unresolved`, after a label selection on one
-  of its dimensions, the warp can't be validated until the label is resolved (see
-  [grids.md](grids.md#select-on-a-grid)).
+- When the source's placements are `Unresolved`, because a label on one of the grid's
+  dimensions removed the grid ([grids.md](grids.md#decisions), decision D), the warp
+  can't be validated until the label is resolved.
 
 ## Footprint
 
@@ -466,10 +483,11 @@ of accepting conservative ones):
 2. **`Mode` counts each cell once,** whatever its overlap. The GDAL adapter rejects
    `Mode`, since GDAL weights by overlap.
 3. **Warped float variables have `nan_is_missing: true`,** and a NaN computed from
-   infinities reads as missing.
+   infinities reads as missing. A warp's float output keeps `nan_is_missing: true`.
 4. **`error_threshold` is in source cells,** and a value above 0 is a permission to
    approximate, not a bound.
-5. **Integer variables with no sentinel** can't be warped with `Nearest` or `Mode`.
+5. **Integer variables with no sentinel** can't be warped with `Nearest` or `Mode`, and
+   `bool` variables can't be warped at all, since neither has a legal `empty_value`.
 6. **`Interpolate` renormalises** over contributors that are inside the source, not
    missing, and have non-zero weight.
 7. **`CubicSpline` is removed.** `Cubic` is Keys with a = -0.5, `Lanczos` has radius 3.

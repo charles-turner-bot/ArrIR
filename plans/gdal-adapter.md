@@ -4,7 +4,7 @@ Status: decided 1 November 2026, after review (see
 [the 1 November discussion](2026-11-01-discussion.md#warp-and-gdal-adapter)), except
 question 3. Part of [the extraction contract](design.md), building on
 [warp.md](warp.md), [cast.md](cast.md) and [select.md](select.md). Its grid rules come
-from [grids.md](grids.md), which is still proposed. Every GDAL behaviour cited here was
+from [grids.md](grids.md). Every GDAL behaviour cited here was
 checked with GDAL 3.13.3. The earlier reasoning is in
 [the 28 October discussion](2026-10-28-discussion.md).
 
@@ -39,7 +39,10 @@ rule 4).
 - **Curvilinear sources** render their `(Centre, Centre)` coordinates as GDAL
   geolocation arrays (`X_DATASET`, `Y_DATASET`), which gdalwarp reads itself. gdalwarp's
   geolocation path uses centres only, so such a warp needs
-  `EdgeRule::MidpointsBetweenCentres`; `FromBounds` is rejected there.
+  `EdgeRule::MidpointsBetweenCentres`; `FromBounds` is rejected there. After a `Select`
+  with `|k| > 1` the `Centre` entry survives and the staggered entries are removed
+  ([grids.md](grids.md#staggered-dimensions)), so geolocation still renders, with
+  `MidpointsBetweenCentres` the only edge rule.
 - **Multidimensional sources** render as classic VRTs, with each slice along the
   non-grid dimensions as a band. Both VRT kinds use the same warper, and the classic
   path is the well-tested one.
@@ -83,6 +86,10 @@ nodata and another doesn't, gdalwarp invents -123456.789 for the other
 (gdalwarp_lib.cpp). Without `-srcnodata nan`, NaN isn't masked, and propagates under
 bilinear.
 
+A 32- or 64-bit integer sentinel whose magnitude keeps the tolerance below 1 matches
+exactly too: an `Int32` sentinel of -1 masked only -1, while 4000000 also masked ±1. A
+magnitude bound is a possible later loosening; for now such sentinels are rejected.
+
 ## Output
 
 ```rust
@@ -117,11 +124,12 @@ that needs one VRT has no parts.
 These settings are always written, so no gdalwarp default decides a result:
 
 - **Geotransform:** the effective affine transform, computed from the grid's declared
-  `transform` and its per-axis `IndexMap` (offset, step) as
-  [grids.md](grids.md#affine-grids) gives it, for sources and for the target.
+  `transform` and both axes' `IndexMap`s (offset, step) by
+  [grids.md](grids.md#affine-grids)'s six-tuple, for sources and for the target. Each
+  origin term includes both axes, so rotated and sheared grids render correctly; a
+  per-axis formula doesn't.
 - **CRS:** WKT2_2019, requested explicitly. GDAL's default `ExportToWkt` writes WKT1
   ([grids.md](grids.md#crs)).
-
 - **Kernel scale:** `XSCALE` and `YSCALE`, set to 1 for `KernelScaling::Point` or to the
   stated factors for `Widen`. gdalwarp's own estimate changes between processing chunks
   ([mdsumner/osgeo-upstream#50](https://github.com/mdsumner/osgeo-upstream/issues/50)).
@@ -143,6 +151,16 @@ These settings are always written, so no gdalwarp default decides a result:
   `near` wrote -9999 as data and `bilinear` mixed it in (-2490, -7495.5); with `NO` the
   results were -5555 (empty) and 13, 15. It also makes `Collision::Nudge` work, since
   gdalwarp only nudges per band.
+- **Single-band `Interpolate` with missing values:** the band is rendered twice and
+  only the first copy is read. A warp with one band leaves a target cell empty when the
+  source cell containing its centre is missing, even when other neighbours are valid;
+  with two bands and `UNIFIED_SRC_NODATA=NO`, gdalwarp renormalises over the valid
+  neighbours, as [warp.md](warp.md#resampling) defines. On a 6×6 source with one NaN
+  and a quarter-cell shift, the duplicated band matched warp.md exactly, both when the
+  missing cell held a target centre (one band gave NaN, two gave 15) and when only a
+  neighbour was missing. "Single-band" means one band in the rendered warped VRT: a
+  variable alone in its method group, or a multidimensional variable with one slice,
+  counts.
 - **Types and nodata:** `-ot`, `-wt`, `-dstnodata` and `-srcnodata` (above), from the
   `Cast` that follows the warp, by the table in
   [cast.md](cast.md#what-gdalwarp-can-emit). Without a `Cast`, the output and working
@@ -185,19 +203,14 @@ These settings are always written, so no gdalwarp default decides a result:
   shifted source values instead of interpolating: a half-cell shift on a one-row source
   gave `[10, 20, 30, 40, 50]` for bilinear, where two or more rows gave
   `[5, 15, 25, 35, 45]`. Cubic and a one-column source behave the same way.
-- `Interpolate` with missing values in a single-band warp. There gdalwarp leaves a
-  target cell empty when the source cell containing its centre is missing, even when
-  other neighbours are valid; warp.md renormalises over them. With two or more bands
-  and `UNIFIED_SRC_NODATA=NO`, gdalwarp renormalises, matching warp.md, for NaN and
-  sentinel nodata alike.
 - An `edge_shape` other than `StraightInIndex`. gdalwarp's cells are straight in the
   source CRS, or bilinear patches between geolocation samples.
-- `Widen` with a factor above 0.5 for `Bilinear` or `Cubic`. gdalwarp's four-sample fast
-  path is used there, and it doesn't widen.
-- `Widen` until a fixture shows the source window padding is enough. gdalwarp ignores
+- `Widen`, until a fixture shows the source window padding is enough. gdalwarp ignores
   `XSCALE` and `YSCALE` when it pads the source window
   ([mdsumner/osgeo-upstream#52](https://github.com/mdsumner/osgeo-upstream/issues/52)),
-  so a widened kernel may be cut at chunk edges.
+  so a widened kernel may be cut at chunk edges. Once padding is checked, a factor
+  above 0.5 for `Bilinear` or `Cubic` stays rejected: gdalwarp's four-sample fast path
+  is used there, and it doesn't widen.
 - A `Cast` whose rounding, out-of-range and collision rules aren't a verified row of
   [cast.md's table](cast.md#what-gdalwarp-can-emit). A `Cast` with no warp uses GDAL's
   ordinary conversion, which gives the table's "ordinary conversion" rows. A
@@ -207,7 +220,13 @@ These settings are always written, so no gdalwarp default decides a result:
   conversion writes NaN as 0 whatever the nodata value. After a `Warp`, that `Cast`
   renders with `-srcnodata nan -dstnodata v`, which writes `v`
   ([cast.md](cast.md#what-gdalwarp-can-emit)).
+- A band whose grid placement was removed (by a strided `Select`, an `M = 0` selection
+  of staggered points, or a `Reduce` over a grid dimension) when its rendering needs a
+  grid, as a warp source does.
 - A plan whose output variables don't fit one classic dataset (see [Output](#output)).
+
+A `Project::Array` of a staggered variable never reaches the adapter: `Project` rejects
+it with `GridCoordinateOutsidePayload` ([grids.md](grids.md#decisions), decision B).
 
 ## Done when
 
@@ -233,8 +252,8 @@ in the repository:
 
 Synthetic cases cover a stride and a reversed slice (both rejected), a warp mixing an
 integer and a float variable, and the GDAL behaviours cited above: approximate nodata
-matching, `UNIFIED_SRC_NODATA`, `Mode` weighting, extent-1 sources and single-band
-`Interpolate` next to missing values.
+matching, `UNIFIED_SRC_NODATA`, `Mode` weighting, extent-1 sources and the duplicated
+band for single-band `Interpolate` next to missing values.
 
 rwarp follows GDAL's source and cites it, so when GDAL disagrees with a reference
 fixture, rwarp is where the cause is traced.
@@ -265,9 +284,9 @@ Decided 1 November 2026, taking the review's recommendations:
 2. **`-et 0` only.**
 3. **`Mode` and `Conservative` are rejected.** `Mode` could later accept target cells
    that are exact unions of source cells, where GDAL's weights don't matter.
-4. **`Interpolate`:** `Bilinear` and `Cubic` only; rejected on extent-1 axes and, with
-   missing values, in single-band warps. Rendering a second band to reach GDAL's
-   renormalising path is a possible later loosening.
+4. **`Interpolate`:** `Bilinear` and `Cubic` only; rejected on extent-1 axes. A
+   single-band warp with missing values renders its band twice to reach GDAL's
+   renormalising path (verified against warp.md's definition).
 5. **`Select`:** `Scalar` on non-grid dimensions and `Slice` with step +1.
 6. **Reductions** through overviews are rejected; multidimensional VRT output is later;
    curvilinear targets are rejected until question 3 is settled.

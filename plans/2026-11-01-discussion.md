@@ -174,14 +174,16 @@ concepts still come from [grids.md](grids.md), reviewed separately.
   - non-NaN sentinels except on integer sources of 16 bits or fewer, since gdalwarp
     matches nodata within a relative `2 × FLT_EPSILON`;
   - several sentinels, or a sentinel with NaN;
-  - `Interpolate` on an axis of extent 1, or next to missing values in a single-band
-    warp (GDAL empties the cell; multi-band with `UNIFIED_SRC_NODATA=NO` renormalises,
-    matching warp.md);
+  - `Interpolate` on an axis of extent 1;
   - `Lanczos`, which differs near the source edge;
   - strided and reversed slices: GDAL's decimation picks `floor((i + 0.5) k)`, and a
     negative `SrcRect` size is an error.
 - **`UNIFIED_SRC_NODATA=NO` is always set.** gdalwarp's default for several bands
   treats a pixel as missing only when every band is, writing a sentinel as data.
+- **A single-band `Interpolate` next to missing values renders its band twice.** With
+  one band GDAL empties a cell whose centre's source cell is missing; with two bands
+  and `UNIFIED_SRC_NODATA=NO` it renormalises, matching warp.md exactly (checked).
+- **`bool` variables can't be warped,** since they have no legal `empty_value`.
 - **The three cast.md cells "not yet checked" are verified:** integer working type
   with bilinear is `Nudge`, and ordinary int→int and int→float conversions are `Keep`.
 
