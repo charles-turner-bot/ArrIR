@@ -12,8 +12,9 @@ This directory preserves the reasoning behind ArrIR, not just a list of features
   grids, the first step towards lowering plans to GDAL.
 - [Warp](warp.md): proposed. Reprojection and regridding between grids, with
   resampling defined independently of any engine.
-- [Cast](cast.md): proposed. Type conversion with rounding, clamping and missing
-  values stated.
+- [Cast](cast.md): decided, revised by #38. Type conversion with rounding,
+  out-of-range handling and missing values stated, compared against Array API, NumPy,
+  xarray and GDAL.
 - [Dtypes](dtypes.md): decided. Promotion, Python scalars and reduction accumulators,
   with every value-changing conversion an explicit `Cast`.
 - [GDAL adapter](gdal-adapter.md): proposed. Rendering plans as GDAL VRT text.
@@ -37,7 +38,8 @@ This directory preserves the reasoning behind ArrIR, not just a list of features
 - [31 October 2026 discussion](2026-10-31-discussion.md): why plans become DAGs, and
   the 1 November decisions on the graph, shapes and dtypes.
 - [1 November 2026 discussion](2026-11-01-discussion.md): the second design round,
-  including the decided schema and Select.
+  including the decided schema, Select, and the `Cast` review against Array API
+  `astype`, NumPy, xarray and GDAL.
 
 Update these notes when a decision changes, stating what changed and why.
 Distinguish proposed designs from implemented behaviour. Passing type/unit tests
