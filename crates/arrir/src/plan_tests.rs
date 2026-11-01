@@ -221,6 +221,45 @@ fn import_accepts_a_dead_duplicate_open() {
 }
 
 #[test]
+fn import_rejects_two_live_opens_of_one_binding() {
+    let reopen = r#"{ "id": 1, "op": { "TestOpen": { "binding": "obs" } }, "inputs": [] }"#;
+    let add = r#"{ "id": 2, "op": { "TestBinary": { "label": "add" } }, "inputs": [0, 1] }"#;
+    let expected = ImportError::Plan(PlanError::DuplicateBinding {
+        binding: BindingId::new("obs"),
+        first: NodeId(0),
+        second: NodeId(1),
+    });
+    assert_eq!(
+        import(&format!("{OPEN_OBS}, {reopen}, {add}"), 2).unwrap_err(),
+        expected.to_string()
+    );
+}
+
+#[test]
+fn import_rejects_a_root_out_of_range() {
+    let expected = ImportError::Plan(PlanError::RootOutOfRange { root: NodeId(4) });
+    assert_eq!(import(OPEN_OBS, 4).unwrap_err(), expected.to_string());
+    assert_eq!(
+        expected.to_string(),
+        "root 4 isn't a node in the graph",
+        "messages print bare positions"
+    );
+}
+
+#[test]
+fn import_rejects_an_empty_node_list() {
+    let expected = ImportError::Plan(PlanError::Empty);
+    assert_eq!(import("", 0).unwrap_err(), expected.to_string());
+}
+
+#[test]
+fn import_rejects_an_unknown_field() {
+    let json = r#"{ "version": "0", "nodes": [], "root": 0, "comment": "hi" }"#;
+    let error = serde_json::from_str::<Plan>(json).unwrap_err().to_string();
+    assert!(error.contains("unknown field `comment`"), "{error}");
+}
+
+#[test]
 fn import_rejects_an_unknown_operation() {
     let mystery = r#"{ "id": 0, "op": { "Mystery": {} }, "inputs": [] }"#;
     let error = import(mystery, 0).unwrap_err();

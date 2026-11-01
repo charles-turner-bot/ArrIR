@@ -33,7 +33,7 @@ pub(crate) struct WireNode {
 pub enum ImportError {
     #[error("unknown wire version {0:?}")]
     UnknownVersion(String),
-    #[error("node at position {position} is written with id {written:?}")]
+    #[error("node at position {position} is written with id {written}")]
     IdNotPosition { position: usize, written: NodeId },
     #[error(transparent)]
     Plan(#[from] PlanError),
