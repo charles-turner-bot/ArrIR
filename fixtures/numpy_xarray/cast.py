@@ -8,7 +8,6 @@ NumPy 2.5.4, xarray 2026.9.0 and array-api-strict 2.6.1 on macOS arm64, 1 Novemb
 """
 
 import os
-import platform
 import sys
 import warnings
 
@@ -18,15 +17,27 @@ import array_api_strict as xp
 import numpy as np
 import xarray as xr
 
-from _check import check, finish, header, raises
+from _check import check, finish, header, on_macos_arm64, raises
 
 header(np, xr, xp)
+print(f"Array API standard {xp.__array_api_version__}")
+check("array-api-strict implements the 2025.12 standard", xp.__array_api_version__, "2025.12")
+
+# An out-of-range float -> integer cast warns (cast.md); later checks silence it.
+with warnings.catch_warnings(record=True) as caught:
+    warnings.simplefilter("always")
+    np.array([np.inf]).astype(np.int16)
+check(
+    "out-of-range cast warns",
+    [str(w.message) for w in caught if w.category is RuntimeWarning],
+    ["invalid value encountered in cast"],
+)
 warnings.simplefilter("ignore", RuntimeWarning)
 
 # Float -> integer truncates (TowardZero), in NumPy and array-api-strict.
-check("NumPy truncates", np.array([2.7, -2.7, 2.5]).astype(np.int16).tolist(), [2, -2, 2])
-strict = xp.astype(xp.asarray([2.7, -2.7, 2.5]), xp.int16)
-check("array-api-strict truncates", [int(strict[i]) for i in range(strict.shape[0])], [2, -2, 2])
+check("NumPy truncates", np.array([2.7, -2.7]).astype(np.int16).tolist(), [2, -2])
+strict = xp.astype(xp.asarray([2.7, -2.7]), xp.int16)
+check("array-api-strict truncates", [int(strict[i]) for i in range(strict.shape[0])], [2, -2])
 
 # Integer narrowing wraps (Wrap).
 check("40000 -> int16 wraps", np.array([40000]).astype(np.int16).tolist(), [-25536])
@@ -67,17 +78,19 @@ raises(
 # xarray: astype on a coordinate payload converts a copy, not the coordinate.
 ds = xr.Dataset(
     {"f": ("x", [1.5, 2.5, 3.5]), "i": ("x", [1, 2, 3])},
-    coords={"x": [0.5, 1.5, 2.5]},
+    coords={"x": [0.5, 1.5, 2.5], "lon": ("x", [10.5, 11.5, 12.5])},
 )
 converted = ds.x.astype("int16")
+check("ds.x.astype: payload named x", converted.name, "x")
 check("ds.x.astype: payload converted", (converted.dtype.name, converted.values.tolist()), ("int16", [0, 1, 2]))
 check("ds.x.astype: coordinate unchanged", converted["x"].dtype.name, "float64")
 both = ds.astype("int16")
 check("Dataset.astype converts every data variable", (both.f.dtype.name, both.i.dtype.name), ("int16", "int16"))
-check("Dataset.astype leaves coordinates", both.x.dtype.name, "float64")
+check("Dataset.astype leaves the index coordinate", both.x.dtype.name, "float64")
+check("Dataset.astype leaves auxiliary coordinates", both.lon.dtype.name, "float64")
 
-# Out-of-range float -> integer: undefined in NumPy. arm64 values from cast.md.
-if platform.machine() in ("arm64", "aarch64"):
+# Out-of-range float -> integer: undefined in NumPy. macOS arm64 values from cast.md.
+if on_macos_arm64():
     i32, i64 = np.iinfo(np.int32), np.iinfo(np.int64)
     u32, u64 = np.iinfo(np.uint32), np.iinfo(np.uint64)
     table = {
@@ -93,6 +106,6 @@ if platform.machine() in ("arm64", "aarch64"):
     for name, expected in table.items():
         check(f"arm64 out-of-range -> {name}", inputs.astype(name).tolist(), expected)
 else:
-    print(f"skip  out-of-range table: recorded for arm64, this is {platform.machine()}")
+    print("skip  out-of-range table: recorded on macOS arm64 only")
 
 finish()
