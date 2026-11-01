@@ -103,8 +103,15 @@ extents:
   `Select` mints a new size symbol, and #37's first proof covers positional selection
   only.
 
-`Declared` uses the binding, not the `Open` node, because dag.md allows one `Open` per
-binding.
+`Declared` uses the binding, not the `Open` node. dag.md counts only live `Open`s per
+binding, so a rewrite may append a replacement `Open` of the same binding; it keeps the
+same size symbols, because it opens the same data.
+
+**Path copies keep node-keyed terms.** dag.md's path copying re-appends every node
+between a rewritten node and the root. A re-appended node computes the same value as
+the node it copies, so when a rewrite compares requirement sets, a `LabelSelect` or
+`CountNonZero` term on a copied node stands for the same term on the original. The
+rewrite knows which nodes it copied; nothing extra is stored in the graph.
 
 ### Where size symbols come from and where they go
 
@@ -223,7 +230,7 @@ centre's (question 8).
 ### Rewrites keep requirements exactly
 
 A rewrite must leave the requirement set unchanged, compared by content (kind and
-extents, ignoring node IDs). Fewer requirements would let a plan that fails at bind
+extents, ignoring node IDs, with path copies standing for the nodes they copy). Fewer requirements would let a plan that fails at bind
 run instead; more would make a plan that bound fine fail. Structural size symbols are
 what make "unchanged" achievable for selection pushdown.
 
@@ -276,7 +283,8 @@ Each operand is an array; the axes are written as `name: extent`.
 6. **Zero size.** `(y: 0) + (y: 0)` gives `(y: 0)`. `(y: 0, x: 3) + (x: 3)` gives
    `(y: 0, x: 3)`. `(y: 0) + (y: 1)` gives `(y: 0)`. `(y: 0) + (y: 5)` is
    `IncompatibleExtents`. `(y: 0) + (y: s)` gives `(y: 0)` with `s ∈ {1, 0}`.
-7. **Scalars.** `() + (y: s, x: 3)` gives `(y: s, x: 3)`. `() + ()` gives `()`.
+7. **Scalars.** `() + (y: s, x: 3)` gives `(y: s, x: 3)`. `() + ()` gives `()`. A literal
+   such as the `2` in `a * 2` is a zero-input node with shape `()` (#47's `Constant`).
 8. **Wrong alignment.** `(lat: 180, lon: 180) + (lat: 180)` aligns `lon` with `lat`. With
    the name check: `AxisNameMismatch { position_from_end: 1, left: lon, right: lat }`.
    NumPy accepts the same shapes and adds along longitude.
