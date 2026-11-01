@@ -262,13 +262,13 @@ data type; `gdal_translate` behaves the same. GDAL has no `bool` type.
 
 | GDAL path | `Rounding` | `OutOfRange` | `Collision` |
 | --- | --- | --- | --- |
-| gdalwarp, integer working type (`-wt` set to the output type), interpolating kernel | `NearestTiesUp` (bilinear: -2.5 → -2, -0.5 → 0) | `Clamp` | `Nudge` (not yet checked) |
+| gdalwarp, integer working type (`-wt` set to the output type), interpolating kernel | `NearestTiesUp` (bilinear: -2.5 → -2, -0.5 → 0) | `Clamp` | `Nudge` (`-dstnodata 15`: a value that interpolates to 15 is written as 14) |
 | gdalwarp, integer working type, `-r near` | `NearestTiesAway` (-2.5 → -3) on the conversion into the working type | `Clamp` | `Nudge` (-9999 → -10000) |
 | gdalwarp, float working type, integer output | `NearestTiesAway` (2.5 → 3, -2.5 → -3, 3.5 → 4) | `Clamp` (`1e6` → 32767, `inf` → 32767) | `Keep` (-9999.0 and -9999.4 → -9999: the nudge is undone by rounding) |
 | gdalwarp, float working type (`Float64` unless `Nearest`), float output | none needed | `Infinity` (verified) | `Nudge` (-9999 → -9998.999999999998) |
 | ordinary conversion, integer output from float (evidence only: never emitted, see NaN below) | `NearestTiesAway` (2.5 → 3, -2.5 → -3) | `Clamp` (`1e6` and `inf` → 32767) | `Keep` (-9999.4 → -9999) |
-| ordinary conversion, integer output from integer | none needed | `Clamp` (40000 → 32767, -5 → 0 as `Byte`) | `Keep` (not yet checked) |
-| ordinary conversion, float output from integer | ties to even (16777217 → 16777216 as `Float32`) | none needed | `Keep` (not yet checked) |
+| ordinary conversion, integer output from integer | none needed | `Clamp` (40000 → 32767, -5 → 0 as `Byte`) | `Keep` (`int32` → `int16` with nodata 32767: 40000 → 32767) |
+| ordinary conversion, float output from integer | ties to even (16777217 → 16777216 as `Float32`) | none needed | `Keep` (`int32` → `float32` with nodata 16777216: 16777217 → 16777216) |
 | ordinary conversion, float output from float | none needed | none: clamps infinities too, so rejected | — |
 
 The GDAL adapter rejects any other combination, including every `Wrap`, every `bool`
@@ -324,11 +324,13 @@ Other checks:
   hold only when the source already has the working type, or the source conversion is
   exact; otherwise the adapter uses a float working type or rejects.
 
-The rounding, clamping and NaN cases above, and the `Collision` cells still marked
-"not yet checked", need fixtures in the same corpus, so that a GDAL upgrade that changes
-any of them is caught. Fixtures for the rounding rows use sources at least two rows
-tall: on a one-row source, bilinear with a float working type returned shifted source
-values instead of averages, while a six-row source averaged as expected.
+Every cell above is verified. The rounding, clamping, NaN and `Collision` cases need
+fixtures in the same corpus, so that a GDAL upgrade that changes any of them is caught.
+Fixtures for the rounding rows use sources at least two cells along each grid axis: on
+a source with an axis of extent 1, gdalwarp's bilinear and cubic return shifted source
+values instead of interpolating, with any working type. That is a GDAL behaviour, not
+a fixture quirk, so the adapter rejects `Interpolate` on such a source
+([gdal-adapter.md](gdal-adapter.md#what-it-rejects)).
 
 ## Fusing a `Warp` and a `Cast`
 

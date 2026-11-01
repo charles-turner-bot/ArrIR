@@ -300,8 +300,8 @@ do not omit a semantic field or its tests to satisfy the line count.
      ([elementwise.md](elementwise.md), decided), implementation #33, using both of the
      above.
 8. An xrexpr adapter for this subset, first with import/export round-trip tests. Then a
-   GDAL adapter for `Open`, positional `Select` and `Warp`, tested against `gdal.Warp`
-   through `gdalxarray`, as in [gdal-adapter.md](gdal-adapter.md).
+   GDAL adapter for `Open`, `Project`, positional `Select`, `Warp` and `Cast`, tested
+   against `gdal.Warp` through `gdalxarray`, as in [gdal-adapter.md](gdal-adapter.md).
 9. One existing rewrite in `arrir-logical`, tested against xrexpr's rule and execution
    oracle.
 10. xarray-ts adapter/conformance fixtures for the same subset, then broaden

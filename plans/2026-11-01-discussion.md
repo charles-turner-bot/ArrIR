@@ -92,10 +92,12 @@ Decisions, from the review's recommendations ([cast.md](cast.md#decisions)): two
 float-to-integer `astype` rejected at lowering; `Wrap` for integer to integer only;
 no coordinate casts; no `bool` with missing values; `same_value` rejected.
 
-A fixture note, not a #40 issue: on a one-row source, `gdal.Warp` with `-r bilinear`
-and a float working type, onto a grid shifted by half a pixel, returned shifted source
-values rather than averages. A six-row source averaged as expected, so cast.md's
-rounding fixtures use sources at least two rows tall.
+On a source with a grid axis of extent 1, `gdal.Warp` with `-r bilinear` or `cubic`,
+onto a grid shifted by half a pixel, returns shifted source values rather than
+interpolating; two or more rows interpolate as expected. The warp review (below)
+confirmed this is GDAL behaviour on any extent-1 axis, not a fixture quirk, so the GDAL
+adapter rejects `Interpolate` there and cast.md's rounding fixtures use sources at least
+two cells along each axis.
 
 ## Elementwise (#32)
 
@@ -149,3 +151,43 @@ Evidence: NumPy 2.5.4, xarray 2026.9.0, dask 2026.8.0, JAX 0.12.0.1 and torch 2.
 run 1 November 2026 on macOS arm64, for integer overflow, division by zero, float floor
 division, `pow` accuracy against mpmath, NaN comparisons, `maximum` and signed zeros,
 result names and coordinate handling.
+
+## Warp and GDAL adapter
+
+[warp.md](warp.md) and [gdal-adapter.md](gdal-adapter.md) were reviewed against the
+decided docs and GDAL 3.13.3 (source and experiments), and are now decided. Their grid
+concepts still come from [grids.md](grids.md), reviewed separately.
+
+- **The target geometry is an input,** as dag.md decision 7 said. `WarpTarget` names,
+  for each target coordinate, the geometry input's variable that supplies it.
+  `GeometryRules` became `CellRules`, so "geometry" means only the input.
+- **`MissingValues` lives in schema-and-values.md.** warp.md keeps only its own rules.
+- **Warped floats have `nan_is_missing: true`.** Otherwise `Nearest` copies a valid
+  NaN that the output then reads as missing.
+- **`Interpolate` is defined exactly:** `Σ w·v / Σ w` over contributors inside the
+  source, not missing and with non-zero weight; `Cubic` is Keys with a = -0.5 and
+  `Lanczos` has radius 3. `CubicSpline` is removed.
+- **`error_threshold` is in source cells,** as gdalwarp measures `-et`, and is a
+  permission, not a bound. The GDAL adapter renders only `-et 0`.
+- **What GDAL computes differently, so the adapter rejects:**
+  - `Mode`, which GDAL weights by overlap;
+  - non-NaN sentinels except on integer sources of 16 bits or fewer, since gdalwarp
+    matches nodata within a relative `2 × FLT_EPSILON`;
+  - several sentinels, or a sentinel with NaN;
+  - `Interpolate` on an axis of extent 1, or next to missing values in a single-band
+    warp (GDAL empties the cell; multi-band with `UNIFIED_SRC_NODATA=NO` renormalises,
+    matching warp.md);
+  - `Lanczos`, which differs near the source edge;
+  - strided and reversed slices: GDAL's decimation picks `floor((i + 0.5) k)`, and a
+    negative `SrcRect` size is an error.
+- **`UNIFIED_SRC_NODATA=NO` is always set.** gdalwarp's default for several bands
+  treats a pixel as missing only when every band is, writing a sentinel as data.
+- **The three cast.md cells "not yet checked" are verified:** integer working type
+  with bilinear is `Nudge`, and ordinary int→int and int→float conversions are `Keep`.
+
+**Question for Mike:** can a warped VRT store a destination geolocation transformer
+([gdal-adapter.md](gdal-adapter.md) question 3)? Curvilinear targets are rejected until
+a fixture settles it.
+
+Evidence: GDAL 3.13.3 via `pixi exec --spec gdal`, NumPy 2.5.4, run 1 November 2026 on
+macOS arm64.
