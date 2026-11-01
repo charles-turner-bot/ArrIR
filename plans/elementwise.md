@@ -291,8 +291,9 @@ so it reaches an elementwise node as `Project::Array`.
   selection pushdown (#37) keeps a valid plan valid.
   - A coordinate that only one operand has is kept, along with its dims. An `Array`'s
     coordinates use only its payload's dims, as xarray requires of a `DataArray`, so
-    those dims are in the output. schema-and-values.md doesn't state this yet, so an
-    operand that breaks it is `CoordinateOutsidePayload`.
+    those dims are in the output. Schema validation now enforces this
+    ([schema-and-values.md](schema-and-values.md)), so `CoordinateOutsidePayload` here
+    is only a backstop.
   - A coordinate that several operands share and that is the same in all of them is
     kept. This covers [dag.md](dag.md#worked-examples)'s `mean(a + b)` and
     `Add(shared, shared)`, and `thetao + so` from one NEMO dataset keeping `nav_lon`

@@ -7,6 +7,11 @@ implement every future variant. It builds on the decided [dag.md](dag.md),
 [shapes.md](shapes.md) and [dtypes.md](dtypes.md), and links to them rather than
 restating their rules.
 
+Implemented so far, in `arrir-types`: `Schema`, `ResultKind`, `Variable`,
+`VariableAxis`, roles, a flat `DType`, `TypeKnowledge`, a declared `Extent` (`Known`
+and `Unknown`) and structural validation. Missing values, scalars, spatial state and
+grids follow in later PRs.
+
 ## Design rule
 
 Use an enum where alternatives have different meaning. Give an option-bearing variant
@@ -75,8 +80,14 @@ validation rejects `Symbolic` there (`SymbolInDeclaredSchema`). Derived schemas 
   exactly that one variable and no coordinates, because every `Open` declares a dataset
   ([dag.md](dag.md#open-projection-and-result-kinds)). It is projected to an `Array`
   before use. This is conservative and can be loosened later.
-- **A coordinate variable's axes are named, or it has none.** A positional array may
-  carry zero-dimensional coordinates only.
+- **A coordinate variable's axes are named, or it has none.** In an `Array` result,
+  every coordinate spans only dimensions the payload spans, as xarray requires of a
+  `DataArray` (`CoordinateOutsidePayload`). A positional array therefore carries
+  zero-dimensional coordinates only.
+- **A variable spans each dimension at most once** (`RepeatedDimension`). xarray
+  2026.9.0 allows `dims=('x', 'x')` at construction with a `UserWarning`, but `.sum('x')`
+  then raises and `.isel(x=0)` drops both axes. One `sizes` entry would also force the
+  two extents to be equal. Rejecting it can be loosened later.
 - Dimension membership is derived from variables, as in xrexpr's `SchemaState`.
   `sizes` gives one extent for every named dimension some variable spans, and none for
   any other. It cannot create a dimension by itself. Grids cannot refer to missing
@@ -129,14 +140,15 @@ the extension plan in grids.md; they are not implemented by this proposal.
 ## Dtypes and scalar values
 
 ```rust
+/// Flat, so the wire tag is the dtype's name (`"Float32"`), as in dag.md's example.
 pub enum DType {
     Bool,
-    Signed(IntWidth),
-    Unsigned(IntWidth),
-    Float(FloatWidth),
+    Int8, Int16, Int32, Int64,
+    UInt8, UInt16, UInt32, UInt64,
+    Float32, Float64,
 }
+/// Used by integer scalars, which carry their width alongside the value.
 pub enum IntWidth { W8, W16, W32, W64 }
-pub enum FloatWidth { W32, W64 }
 pub enum Scalar {
     Bool(bool),
     Signed(SignedScalar),
