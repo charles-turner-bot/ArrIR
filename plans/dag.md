@@ -36,8 +36,9 @@ Positional semantics referred to here (broadcasting, via #29 and #46) follow the
 ## The plan
 
 ```rust
-/// A node's position in its graph. Never reused.
-pub struct NodeId(u32);
+/// A node's position in its graph. Never reused. The field is public: an ID is only a
+/// position, and everything that takes one checks it against a graph.
+pub struct NodeId(pub u32);
 
 pub struct Node {
     pub operation: Operation,

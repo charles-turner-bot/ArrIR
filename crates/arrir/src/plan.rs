@@ -22,6 +22,13 @@ impl NodeId {
     }
 }
 
+/// Prints the bare position, so error messages read "root 5", not "root NodeId(5)".
+impl std::fmt::Display for NodeId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 /// What a node computes. Real operations land one PR at a time (`plans/design.md`,
 /// roadmap). Until the first one does, the only variants are test placeholders, so
 /// outside tests this enum has no values and no graph can be built.
@@ -94,19 +101,19 @@ pub struct Node {
 pub enum PlanError {
     #[error("the graph has no nodes")]
     Empty,
-    #[error("node {node:?} has input {input:?}, which doesn't exist")]
+    #[error("node {node} has input {input}, which doesn't exist")]
     DanglingInput { node: NodeId, input: NodeId },
-    #[error("node {node:?} has input {input:?}, which isn't an earlier node")]
+    #[error("node {node} has input {input}, which isn't an earlier node")]
     ForwardInput { node: NodeId, input: NodeId },
-    #[error("node {node:?} expects {expected:?} inputs, found {found}")]
+    #[error("node {node} expects {expected:?} inputs, found {found}")]
     WrongArity {
         node: NodeId,
         expected: Arity,
         found: usize,
     },
-    #[error("root {root:?} isn't a node in the graph")]
+    #[error("root {root} isn't a node in the graph")]
     RootOutOfRange { root: NodeId },
-    #[error("binding {binding:?} is opened by both {first:?} and {second:?}")]
+    #[error("binding {binding:?} is opened by both {first} and {second}")]
     DuplicateBinding {
         binding: BindingId,
         first: NodeId,
