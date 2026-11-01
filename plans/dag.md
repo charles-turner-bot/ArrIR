@@ -159,6 +159,55 @@ Each operation states which result kinds it accepts. Elementwise arithmetic on a
 comes first; dataset arithmetic (xarray applies it per variable) needs its own decision
 in #32, and until then it's rejected rather than guessed.
 
+## ID scope across Opens
+
+Neither #15 nor #26 says how far a `DimId`, `VarId` or `GridId` reaches. With one
+`Open` it didn't matter. With two, both datasets can have a `time` dimension and a
+`temp` variable, and the plan has to say whether they're the same thing.
+
+**Recommendation: dimensions are plan-wide; variables and grids are per schema.**
+
+- **`DimId` is plan-wide.** The same `DimId` in two `Open`s names one axis. This is
+  what named broadcasting (#34) needs, and it matches xarray, where dimension names are
+  the identity used for alignment.
+- **A shared `DimId` asserts axis identity, nothing more.** It doesn't say the
+  coordinate labels match, or that the extents are equal. `obs` may have 365 `time`
+  steps and `model` 360. That's valid at `Open`. An operation that combines inputs
+  positionally checks extents where it combines them, and known extents must agree
+  there (or broadcast, per #29). Making differently labelled axes agree is alignment,
+  which #34 lowers to explicit selection nodes before the combining operation.
+- **`VarId` is scoped to one node's schema.** `Project { variable }` names a variable
+  in its single input's schema, so two `temp`s in two `Open`s never meet in one name
+  lookup. Where an operation's output has to name a variable from several inputs, that
+  operation states the rule (#32 for elementwise results; a future `Merge` rejects
+  collisions or requires a rename).
+- **`GridId` is scoped to one node's schema too.** Whether two `Open`s share a grid is
+  checked by comparing their declared grid definitions, not by matching IDs. A shared
+  ID across bindings would claim the CRS and transform are equal without checking.
+- **Different axes with one name are renamed at lowering.** If `model`'s `time` is
+  really forecast lead time, the host lowers it as `lead` and keeps its own name map,
+  as design.md already requires for host symbols. Qualifying IDs by binding
+  (`model.time`) was rejected: nodes after a `Project` or an `Add` have no single
+  binding, and xarray results carry plain names.
+- **Rewrites never rename dimensions.** Because a `DimId` is shared, a rewrite that
+  moves a `Select { time }` below an `Add` applies it to both inputs.
+
+Worked example, `obs.temp + model.temp`:
+
+| Node | Operation | Inputs | Derived output |
+| --- | --- | --- | --- |
+| 0 | `Open { binding: obs }` | — | `temp (time: 365, lat: 180)` |
+| 1 | `Open { binding: model }` | — | `temp (time: 360, lat: 180)` |
+| 2 | `Project { variable: temp }` | 0 | Array `temp (time: 365, lat: 180)` |
+| 3 | `Project { variable: temp }` | 1 | Array `temp (time: 360, lat: 180)` |
+| 4 | elementwise add | 2, 3 | rejected: known `time` extents 365 and 360 differ |
+
+Both `Open`s are valid, and `time` and `lat` are each one axis. Node 4 fails because
+positional addition needs equal extents. Xarray's `obs.temp + model.temp` lowers
+through #34 instead: selection nodes on 2 and 3 that bring `time` to the matched labels,
+then the add. If `model`'s `time` were lead time, the host would lower it as `lead`, and
+the add would broadcast to `(time, lat, lead)` under #34's named rules instead.
+
 `Warp`'s target geometry stays a `GeometryBinding` field ([warp.md](warp.md)) for now.
 It's a declared requirement on external geometry, not a value computed in the plan.
 Whether it becomes an `Open` input is a review question below.
@@ -321,3 +370,7 @@ implementation is #28, after review.
 6. **Dead nodes on the wire.** Allow them, or require compacted plans at every export?
 7. **Warp geometry.** Keep `GeometryBinding` as an operation field, or turn the target
    geometry into an `Open` input so it can also be computed?
+8. **ID scope.** Plan-wide `DimId`, with `VarId` and `GridId` scoped to one node's
+   schema, and renaming at lowering for distinct axes that share a name? The
+   alternative is per-`Open` scope for everything, with an explicit mapping operation
+   wherever two datasets meet.
