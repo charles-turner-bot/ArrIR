@@ -57,6 +57,14 @@ so that it agrees with the label rule below.
   numerically relaxed rewrites require explicit permission. Strictness does not
   imply that unrelated execution engines already guarantee bitwise equality;
   adapters must expose or reject unsupported numerical requirements.
+  *Proposed, 31 October, pending review:* a reduction declares its order, either
+  `Sequential` (strict) or `Unspecified`, which is a relaxation that lowering writes
+  explicitly. Rewrites that split or merge reductions need `Unspecified`
+  ([dtypes.md](dtypes.md#order)).
+- *Proposed, 31 October, pending review:* ArrIR promotes dtypes implicitly only where
+  the conversion is exact, following Array API 2025.12. Every value-changing conversion
+  is a `Cast` that lowering inserts, and a reduction states its accumulator, result and
+  order ([dtypes.md](dtypes.md)).
 - Support external arrays through explicit binding IDs and declared metadata.
   A binding is not an embedded array, a Python pointer, or a download instruction.
   Importing a plan never executes or resolves it automatically.

@@ -64,7 +64,33 @@ Details in [shapes.md](shapes.md). All pending review.
   unordered pairs.
 - **No Broadcast node and no constraint solver** for now.
 
+## Dtypes (#30)
+
+Details in [dtypes.md](dtypes.md). All pending review.
+
+- **Implicit promotion only where it is exact.** The Array API 2025.12 table is used for
+  the pairs it defines. Mixed kinds and `u64` with a signed integer are rejected, and
+  lowering writes its host's rule as an explicit `Cast`.
+- **No weak types in the plan.** Python scalars are typed by lowering, as Array API and
+  NEP 50 describe, and enter as typed constants.
+- **A reduction states its accumulator and its result dtype.** The input must convert
+  to the accumulator exactly; otherwise lowering casts first. There is no default
+  integer. Charles decided (1 November) on a separate `result` field rather than a
+  `Cast` after the reduction. It allows `f64` narrowed to `f32` (by cast.md's rule and
+  `OutOfRange`) and an integer-accumulated mean with a float result.
+- **A reduction declares its order.** `Sequential` is strict, and `Unspecified` is an
+  explicit relaxation. Lowering from NumPy, xarray and dask writes `Unspecified`,
+  because none of them promises an order. The first review found that an
+  unspecified-only design reversed design.md's strictness rule inside reductions.
+- **Float narrowing is writable.** cast.md gains IEEE rounding for conversions to
+  float types, `OutOfRange::Infinity`, and an explicit `Collision` for any rounding
+  conversion of a variable with missing values.
+- **No `Promote` node.**
+
+Open questions are at the end of [dtypes.md](dtypes.md).
+
 ## Not settled
 
-The questions at the end of [dag.md](dag.md) and [shapes.md](shapes.md), and the
+The questions at the end of [dag.md](dag.md), [shapes.md](shapes.md) and
+[dtypes.md](dtypes.md), and the
 rewrite termination measure for graphs, which goes to #37.

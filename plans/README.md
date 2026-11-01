@@ -12,6 +12,8 @@ This directory preserves the reasoning behind ArrIR, not just a list of features
   resampling defined independently of any engine.
 - [Cast](cast.md): proposed. Type conversion with rounding, clamping and missing
   values stated.
+- [Dtypes](dtypes.md): proposed. Promotion, Python scalars and reduction accumulators,
+  with every value-changing conversion an explicit `Cast`.
 - [GDAL adapter](gdal-adapter.md): proposed. Rendering plans as GDAL VRT text.
 - [Plans as DAGs](dag.md): proposed. Nodes with ordered inputs, stable IDs and one
   root, replacing linear unary chains.

@@ -116,9 +116,10 @@ These settings are always written, so no gdalwarp default decides a result:
 - `Widen` until a fixture shows the source window padding is enough. gdalwarp ignores
   `XSCALE` and `YSCALE` when it pads the source window (osgeo-upstream#52), so a widened
   kernel may be cut at chunk edges.
-- A `Cast` whose rounding and collision rule aren't a row of
+- A `Cast` whose rounding, out-of-range and collision rules aren't a row of
   [cast.md's table](cast.md#what-gdalwarp-can-emit). A `Cast` with no warp uses GDAL's
-  ordinary conversion, so only `NearestTiesAway` with `Collision::Keep`.
+  ordinary conversion, which gives the table's two "ordinary conversion" rows. Cells
+  marked unverified are rendered, and the meaning check below settles them.
 - A plan whose output variables don't fit one classic dataset (see [Output](#output)).
 
 ## Done when
