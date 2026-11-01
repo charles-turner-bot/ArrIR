@@ -50,7 +50,9 @@ pub struct GeometryRules {
 }
 
 pub struct WarpTarget {
-    /// The output grid. Its ID, dimensions and coordinate names are new to the schema.
+    /// The output grid. Its ID and coordinate names are new to the output schema. A
+    /// dimension name already used elsewhere in the plan names the same axis
+    /// (`plans/dag.md`, "ID scope across Opens").
     pub grid: Grid,
     /// The size of each of the target grid's dimensions.
     pub sizes: Vec<(DimId, u64)>,
@@ -283,7 +285,8 @@ Valid ranges (CF's `valid_min`, `valid_max` and `valid_range`) aren't covered ye
   from `target.geometry`. Warped variables are placed on it, at its primary location:
   `Centre` on both axes for `Horizontal`, a face for `Mesh`, a cell for `Dggs`.
 - Variables on `source_grid` that aren't listed stay where they are. The source grid and
-  its coordinate variables are dropped once no data variable is placed on it.
+  its coordinate variables are dropped once no data variable is placed on it. A target
+  that reuses the source grid's names requires this (see [Validation](#validation)).
 
 ## Validation
 
@@ -297,7 +300,15 @@ Valid ranges (CF's `valid_min`, `valid_max` and `valid_range`) aren't covered ye
 - `Widen` factors are in (0, 1].
 - Both grids have a spatial reference: a `crs`, or a DGGS system.
 - The target's grid ID, dimension names and coordinate names don't collide with any
-  already in the schema.
+  already in the schema, with one exception. The target may reuse the source grid's
+  dimension and coordinate names when the warp empties the source grid: every data
+  variable placed on `source_grid` is listed, and no variable off the grid spans its
+  dimensions. The source grid and its coordinates are then dropped (see above), so the
+  names are free. This is how `obs (lat, lon)` is warped onto `model`'s `(lat, lon)`
+  grid; under [dag.md](dag.md)'s plan-wide `DimId`, the reused names then are the same
+  axes as `model`'s. If any variable stays on the source grid, the names would name two
+  grids' axes in one schema, so the warp is rejected; warp the remaining variables too,
+  or `Rename` first.
 - `sizes` gives exactly the target grid's dimensions, once each.
 - **`target.geometry`:**
   - It is set exactly when the target's model refers to coordinate variables.

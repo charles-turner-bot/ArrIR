@@ -12,7 +12,14 @@ This directory preserves the reasoning behind ArrIR, not just a list of features
   resampling defined independently of any engine.
 - [Cast](cast.md): proposed. Type conversion with rounding, clamping and missing
   values stated.
+- [Dtypes](dtypes.md): proposed. Promotion, Python scalars and reduction accumulators,
+  with every value-changing conversion an explicit `Cast`.
 - [GDAL adapter](gdal-adapter.md): proposed. Rendering plans as GDAL VRT text.
+- [Plans as DAGs](dag.md): proposed. Nodes with ordered inputs, stable IDs and one
+  root, replacing linear unary chains.
+- [Symbolic shapes](shapes.md): proposed. Named and positional axes, known, symbolic
+  and unknown extents, and broadcasting by name or by position, with requirements
+  checked at bind, label resolution or execution.
 - [Array API coverage](array-api-coverage.md): proposed. How each Array API 2025.12
   function maps onto ArrIR, and which concepts are missing.
 - [26 October 2026 discussion](2026-10-26-discussion.md): why the old scaffold is
@@ -21,6 +28,7 @@ This directory preserves the reasoning behind ArrIR, not just a list of features
   this contract: purity rules, the dependency graph, `Open`, and the byterefs layout.
 - [28 October 2026 discussion](2026-10-28-discussion.md): GDAL as a target, and grids,
   CRS and staggering in the schema.
+- [31 October 2026 discussion](2026-10-31-discussion.md): why plans become DAGs.
 
 Update these notes when a decision changes, stating what changed and why.
 Distinguish proposed designs from implemented behaviour. Passing type/unit tests
