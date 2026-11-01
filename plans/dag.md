@@ -28,7 +28,7 @@ else.
   per-operation effects become per-node effects here, with one footprint per input.
   Nothing in this proposal depends on #16's code.
 
-Positional semantics referred to here (broadcasting, via #29) follow the
+Positional semantics referred to here (broadcasting, via #29 and #46) follow the
 [Array API 2025.12](https://data-apis.org/array-api/2025.12/) standard, observed on
 31 October 2026.
 
@@ -228,16 +228,17 @@ Neither #15 nor #26 says how far a `DimId`, `VarId` or `GridId` reaches. With on
 
 - **`DimId` is plan-wide, for named axes.** An axis is `AxisName::Named(DimId) |
   Positional`, as #46 defines. The same `DimId` on named axes in two `Open`s names one
-  axis. This is what named broadcasting (#34) needs, and it matches xarray, where
+  axis. This is what named broadcasting (#46) needs, and it matches xarray, where
   dimension names are the identity used for alignment. Positional axes, from NumPy and
   Array API hosts, carry no ID and are identified by trailing position (see #46,
   shapes.md); the rules below about shared `DimId`s don't apply to them.
 - **A shared `DimId` asserts axis identity, nothing more.** It doesn't say the
   coordinate labels match, or that the extents are equal. `obs` may have 365 `time`
   steps and `model` 360. That's valid at `Open`. An operation that combines inputs
-  positionally checks extents where it combines them, and known extents must agree
-  there (or broadcast, per #29). Making differently labelled axes agree is alignment,
-  which #34 lowers to explicit selection nodes before the combining operation.
+  checks extents where it combines them: a named axis on both sides needs equal known
+  extents, and only positional axes stretch (rules in #46, shapes.md). Making
+  differently labelled axes agree is coordinate label alignment, which #34 lowers to
+  explicit selection nodes before the combining operation.
 - **`VarId` is scoped to one node's schema.** `Project` names variables in its single
   input's schema, so two `temp`s in two `Open`s never meet in one name lookup. Where an
   operation's output has to name a variable from several inputs, that operation states
@@ -264,8 +265,9 @@ Neither #15 nor #26 says how far a `DimId`, `VarId` or `GridId` reaches. With on
   name already in use asserts it's the same axis as that one.
 - **Rewrites never rename dimensions.** Because a `DimId` is shared, a rewrite that
   moves a `Select { time }` below an `Add` must select on every input that has `time`.
-  The index for each input is derived from the broadcast mapping, not copied: a
-  size-one `time` axis isn't sliced like a full one. That legality proof is #37's.
+  The index for each input is derived from the broadcast mapping (#46), not copied:
+  an input without `time` gets no selection on it, and a stretched positional axis isn't
+  sliced like a full one. That legality proof is #37's.
 - **New dimensions join the plan's namespace.** A `Warp` target whose dimensions reuse
   a name from elsewhere in the plan (`lat` and `lon` from another dataset, say) asserts
   they're the same axes. Its target `GridId` is still compared by definition.
@@ -281,10 +283,11 @@ Worked example, `obs.temp + model.temp`:
 | 4 | elementwise add | 2, 3 | rejected: known `time` extents 365 and 360 differ |
 
 Both `Open`s are valid, and `time` and `lat` are each one axis. Node 4 fails because
-positional addition needs equal extents. Xarray's `obs.temp + model.temp` lowers
-through #34 instead: selection nodes on 2 and 3 that bring `time` to the matched labels,
-then the add. If `model`'s `time` were lead time, the host would lower it as `lead`, and
-the add would broadcast to `(time, lat, lead)` under #34's named rules instead.
+`time` is on both sides with unequal known extents, and named axes never stretch (#46,
+shapes.md). Xarray's `obs.temp + model.temp` lowers through #34 instead: label
+alignment adds selection nodes on 2 and 3 that bring `time` to the matched labels, then
+the add. If `model`'s `time` were lead time, the host would lower it as `lead`, and the
+add would give `(time, lat, lead)` under #46's named rules.
 
 `Warp`'s target geometry is a `GeometryBinding` field in [warp.md](warp.md). It's a
 declared requirement on external geometry, not a value computed in the plan. Question 7
@@ -456,8 +459,8 @@ Wire rules:
 ## Not in this proposal
 
 No scheduler, evaluation order, kernels, memoisation or embedded data. No elementwise
-vocabulary (#32), broadcasting (#29), dtype rules (#30) or index alignment (#34). The
-implementation is #28, after review; compaction is later still.
+vocabulary (#32), broadcasting (#29, #46), dtype rules (#30) or label alignment
+(#34). The implementation is #28, after review; compaction is later still.
 
 ## Questions for review
 
