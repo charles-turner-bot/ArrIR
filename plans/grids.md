@@ -378,12 +378,7 @@ step'   = step * k
 Both are integers, so the result is exact and merging selections doesn't change it.
 The grid stays `Placed`.
 
-An adapter renders the effective transform from the declared one. On the column axis,
-with `o` and `t` for the index map's offset and step:
-
-| Effective | Value |
-| --- | --- |
-With the column map `(o_c, t_c)`, the row map `(o_r, t_r)`, and
+An adapter renders the effective transform from the declared one. With the column map `(o_c, t_c)`, the row map `(o_r, t_r)`, and
 `a_c = o_c + (1 - t_c)/2`, `a_r = o_r + (1 - t_r)/2`, the declared transform
 `(x0, dx, rx, y0, ry, dy)` becomes:
 
