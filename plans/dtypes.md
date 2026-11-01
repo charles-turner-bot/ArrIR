@@ -158,7 +158,8 @@ pub struct Constant {
   variable has `dims: []`, the dtype of `value`'s variant, and
   `missing: Known { values: [], nan_is_missing }`. VarIds are scoped to one node's
   schema ([dag.md](dag.md)), so the fixed name can't collide with an operand's
-  variable. How an elementwise result names its variable is #32's rule. The constant
+  variable. How an elementwise result names its variable is #32's rule
+  ([elementwise.md](elementwise.md#the-output-schema)). The constant
   broadcasts against any shape ([shapes.md](shapes.md)).
 - **NaN.** A NaN constant states whether it is missing. Xarray treats NaN as missing,
   so its lowering writes `true`. Array API has no missingness, so its lowering writes
@@ -243,9 +244,10 @@ nothing has a default. `OutOfRange` is cast.md's enum, not a second one.
    in the accumulator, and the quotient is then narrowed to `result` if the two differ.
    An empty mean is NaN, as Array API requires. Skipping missing values is #39's.
 4. **`sum` and `prod` accept any numeric accumulator.** The empty sum is 0 and the empty
-   product is 1. Integer overflow behaves as `add` and `multiply` do (#32). Wrapping
+   product is 1. Integer overflow behaves as `add` and `multiply` do. Wrapping
    overflow makes integer results independent of order; trapping or saturating
-   overflow doesn't, and #32 must say which applies.
+   overflow doesn't. [elementwise.md](elementwise.md#integer-overflow-wraps) proposes
+   wrapping (#32).
 
 ### Order
 
@@ -259,7 +261,7 @@ dimensions.
 
 | Reduction | Under `Sequential` | Under `Unspecified` |
 | --- | --- | --- |
-| `sum`, `prod` | none allowed | all allowed. Partial reductions keep the accumulator, and only the final combine converts to `result`. Merging needs both reductions `Unspecified`, with the same accumulator, and the inner one's `result` equal to its accumulator |
+| `sum`, `prod` | none allowed with a float accumulator; all allowed with an integer one, because integers wrap ([elementwise.md](elementwise.md#integer-overflow-wraps), proposed) | all allowed. Partial reductions keep the accumulator, and only the final combine converts to `result`. Merging needs both reductions `Unspecified`, with the same accumulator, and the inner one's `result` equal to its accumulator |
 | `mean` | none allowed | split through `sum` and a count; merge only when every group has the same count, which needs #39's missing-value facts |
 | `count_nonzero` | all allowed: integer counting doesn't depend on order | all allowed |
 | `min`, `max`, `any`, `all` | all allowed, once #32 fixes NaN and signed-zero handling | all allowed, on the same condition |

@@ -20,6 +20,9 @@ This directory preserves the reasoning behind ArrIR, not just a list of features
 - [Symbolic shapes](shapes.md): decided. Named and positional axes, known, symbolic
   and unknown extents, and broadcasting by name or by position, with requirements
   checked at bind, label resolution or execution.
+- [Elementwise](elementwise.md): proposed. The `Elementwise` operation and its
+  functions, integer overflow and division by zero, non-finite values, and the output
+  schema.
 - [Array API coverage](array-api-coverage.md): audit. How each Array API 2025.12
   function maps onto ArrIR, and which concepts are missing.
 - [26 October 2026 discussion](2026-10-26-discussion.md): why the old scaffold is
@@ -30,6 +33,7 @@ This directory preserves the reasoning behind ArrIR, not just a list of features
   CRS and staggering in the schema.
 - [31 October 2026 discussion](2026-10-31-discussion.md): why plans become DAGs, and
   the 1 November decisions on the graph, shapes and dtypes.
+- [1 November 2026 discussion](2026-11-01-discussion.md): the elementwise family.
 
 Update these notes when a decision changes, stating what changed and why.
 Distinguish proposed designs from implemented behaviour. Passing type/unit tests
