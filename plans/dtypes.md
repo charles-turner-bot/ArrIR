@@ -320,7 +320,7 @@ A plan that needs the precision states it:
 One node accumulates in `f64` and returns `f32`. No `Cast` comes before it, because
 `f32` to `f64` is exact. The final quotient is narrowed by cast.md's rule: rounding to
 nearest, ties to even, and overflowing to infinity as NumPy does
-([cast.md](cast.md#definitions)).
+([cast.md](cast.md#conversion-matrix)).
 
 **Adapters map the node to one host expression or reject it.** The xarray adapter emits
 `x.mean("time", dtype="float64").astype("float32")`, since NumPy's `astype` matches
@@ -351,12 +351,13 @@ ArrIR never inserts a `Cast` implicitly. Lowering inserts one for:
 - a reduction output dtype that `ReductionTypes` can't express, after it;
 - missing values introduced into an integer variable (#34, #39).
 
-A conversion that can round needs care with missing values. An integer of 32 bits or
-more converted to `f32`, a 64-bit integer converted to `f64`, and `f64` narrowed to
-`f32` can all land a valid value on a missing sentinel. When the input's missing values
-include a sentinel other than NaN, such a `Cast` must set `missing` with an explicit
-`Collision` ([cast.md](cast.md#validation), #39). Nothing rounds onto NaN, so NaN alone
-needs neither.
+A conversion that isn't exact needs care with missing values. Rounding (an integer of
+32 bits or more converted to `f32`, a 64-bit integer converted to `f64`, `f64` narrowed
+to `f32`, float to integer) and `out_of_range` (`Clamp`, `Wrap`) can all land a valid
+value on a missing sentinel. When the input's missing values include a sentinel other
+than NaN, such a `Cast` must set `missing` with an explicit `Collision`
+([cast.md](cast.md#missing-values), #39). Nothing rounds, clamps or wraps onto NaN, so
+NaN alone needs neither.
 
 ## No Promote node
 

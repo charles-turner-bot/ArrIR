@@ -48,8 +48,8 @@ symbolic extent ([shapes.md](shapes.md)).
 | Type promotion, scalar arguments | Meta | Decided in [dtypes.md](dtypes.md) (for #30); to be implemented in #31. Mixed kinds are rejected (`MixedKind`, its question 1, decided 1 November). Python scalars become `Constant` nodes. |
 | Data types | Meta | Bool, int8–64, uint8–64, float32/64 are in #26's `DType`. complex64/128 are **required** by the spec but deferred in #26 and dtypes.md. |
 | Basic indexing (int, slice, ellipsis) | Direct | `Select` positional indexers, #3; conventions in [design.md](design.md#conventions). |
-| Integer-array indexing | Direct | The spec's subset of vectorised indexing; #36 compares it with orthogonal indexing and chooses the modes. Slices mixed with integer arrays are unspecified by the spec; reject. |
-| Boolean-array indexing | Runtime | #36; the extent is a symbol for the true count (a `CountNonZero` size term in #36 and shapes.md). A literal mask has a known count (#3). |
+| Integer-array indexing | Direct | `Select` in pointwise mode ([select.md](select.md), decided for #36). Slices mixed with integer arrays are unspecified by the spec; reject. |
+| Boolean-array indexing | Runtime | #36; the extent is a symbol for the true count (a `CountNonZero` size term in #36 and shapes.md). A literal mask has a known count (#3). One-dimensional masks only; multi-dimensional masks wait for a traversal-order contract ([select.md](select.md)). |
 | Data-dependent output shapes | Runtime | Symbolic extents (#29/shapes.md, #36). The spec lets libraries omit these; adapters advertise this as a capability. |
 | Copies, views, mutation | Deferred | Plans are values, and the proposed node arena is append-only (dag.md). `copy=` and in-place operators are adapter concerns. |
 | Device support | Deferred | Outside the logical core, as #41 requires; no result semantics depend on it. |
@@ -82,7 +82,7 @@ Each function appears once. Proposed representation is in the third column.
 | `clip` | Compose | `maximum` then `minimum`; scalar promotion as clarified in 2025.12 (dtypes.md). |
 | `conj`, `real`, `imag` | Deferred | Complex dtypes (#26, dtypes.md). |
 | **Indexing** | | |
-| `take` | Direct | `Select` with a bound position array on one dimension, #36. |
+| `take` | Direct | `Select` with an `IntArray` indexer on one axis, orthogonal mode ([select.md](select.md), #36). |
 | `take_along_axis` | New | Not in #36's current scope.¹ |
 | **Linear algebra** | | |
 | `matrix_transpose` | Direct | Transpose of the last two dimensions, #4. |

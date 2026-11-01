@@ -377,6 +377,10 @@ When both entries exist, they swap.
 - **A position list or a mask** keeps its dimension, as the conventions say, but removes
   every placement on that grid. The selected cells don't form an affine, rectilinear or
   curvilinear grid in general.
+- **A computed position array or mask** (a `Select` input, [select.md](select.md)) acts
+  like a position list or mask. A pointwise selection removes the placements of every
+  grid with an axis indexed by an array; an axis indexed only by a slice keeps its
+  transformed grid.
 - **A label selection** becomes one of the above once it's resolved. Until then, the
   grid after the selection is unknown, like an unknown size. Operations that need the
   grid, such as `Warp`, can't be validated until the label is resolved.

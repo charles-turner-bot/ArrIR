@@ -117,8 +117,9 @@ Proposed on 28 October, designed in [grids.md](grids.md):
   explicit: the resampling method and empty-cell value for each variable, the edge
   rule, the cells' edge shape and the transformer's error threshold. Resampling methods
   are defined in ArrIR, not by any adapter.
-- **`Cast` is an operation** ([cast.md](cast.md)), proposed. It converts a variable's
-  type with rounding, out-of-range handling and missing-value encoding stated. `Warp`
+- **`Cast` is an operation** ([cast.md](cast.md)), revised by #38 and decided 1 November. It
+  converts an array, or listed variables of a dataset, to another type, with rounding,
+  out-of-range handling and missing-value encoding stated. `Warp`
   doesn't convert types; an adapter whose engine does both emits the pair as one call.
 - **An enum variant with options holds a named struct** (`Conservative(ConservativeOptions)`),
   so each set of options has its own `impl` for validation. Fields are grouped into a
@@ -200,9 +201,10 @@ From #16, for positional semantics:
 - Positions are 0-based, and a negative position counts back from the end. Slices are
   half-open, with Python semantics. Adapters for hosts with other conventions translate
   them. R, for example, is 1-based and treats negative indices as exclusions.
-- A scalar indexer drops its dimension. Slices, position lists and masks never do. A host
-  whose indexing drops length-1 results (R's `drop = TRUE`) lowers those to scalar
-  indexers.
+- A scalar indexer drops its dimension. Slices, position lists and masks never do in
+  orthogonal mode; pointwise mode replaces the indexed axes with its indexers' broadcast
+  axes ([select.md](select.md)). A host whose indexing drops length-1 results (R's
+  `drop = TRUE`) lowers those to scalar indexers.
 - A positional mask must match the dimension length exactly. There is no recycling.
 - Label selections have unknown extent until they are resolved. In derived shapes that
   unknown is a size symbol with an identity ([shapes.md](shapes.md)).
@@ -279,7 +281,8 @@ do not omit a semantic field or its tests to satisfy the line count.
    `ArraySchema` with a dataset-level schema. Then, in separate PRs: grids, CRS and
    pixel interpretation, and staggered placements, as in [grids.md](grids.md).
 4. Positional indexer values, then label/advanced-index and binding values in
-   separate PRs. Preserve source distinctions used by rewrite proofs.
+   separate PRs. Preserve source distinctions used by rewrite proofs. Indexing modes
+   and computed indexers are decided in [select.md](select.md).
 5. A deliberately bounded reduction specification with explicit result options;
    reject anything outside that supported subset.
 6. Reduce and Select operation structs, each with its effects (purity rule 3; `Select`'s
