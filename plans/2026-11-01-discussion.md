@@ -165,9 +165,13 @@ positions. The main changes:
   inference and fails to round-trip in `f64`.
 - **CF bounds stay ordinary coordinates.** Converting them needs a value check, and
   cf_xarray silently accepts bounds whose cells don't share edges.
-- **Operations' effects on grids are stated:** `Project::Array` drops model entries
-  outside its payload, `Reduce` removes placements, a label on a grid dimension makes
-  it `Unresolved`, and a grid with nothing placed on it is removed.
+- **Operations' effects on grids are stated:** `Project::Array` keeps a grid only when
+  its payload spans the grid's centre dimensions and otherwise rejects
+  (`GridCoordinateOutsidePayload`, so MOM6's `ds["u"]` is rejected for now). `Reduce`
+  removes placements, a label on a grid dimension makes it `Unresolved`, and a grid with
+  no data variable placed on it is removed. A re-check found the first draft rejected
+  its own MOM6 example and let pushdown merge change "in step" results; selections on
+  different axes of one grid no longer merge.
 - **Strides with `|k| > 1` and empty selections remove staggered placements,** including
   NEMO-style staggering on the centre dimension.
 - **WKT2_2019 is the stored CRS form;** GCPs, RPCs and byterefs `affine` grids wait.

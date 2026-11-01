@@ -210,6 +210,12 @@ pub enum Project {
     /// A subset of variables, in this order. Output is `ResultKind::Dataset`.
     Dataset(Vec<VarId>),
 }
+
+pub enum ProjectError {
+    /// Project::Array of a variable whose payload doesn't span its grid's centre
+    /// dimensions (grids.md, "Other operations").
+    GridCoordinateOutsidePayload { node: NodeId, variable: VarId },
+}
 ```
 
 One `Open` can feed several projections, which is how two variables from one file meet

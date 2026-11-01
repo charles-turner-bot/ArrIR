@@ -312,7 +312,8 @@ so it reaches an elementwise node as `Project::Array`.
   unequal ones are rejected, as
   [dag.md](dag.md#id-scope-across-opens) requires. Equal definitions at one location give
   `Placed` on the first placed operand's grid. Different locations are
-  `GridLocationMismatch` (decision 10): only `Select` drops a placement
+  `GridLocationMismatch` (decision 10): only explicit operations (`Select`, `Reduce`,
+  [grids.md](grids.md#other-operations)) drop a placement, and `Elementwise` never does
   ([schema-and-values.md](schema-and-values.md#spatial-state-is-not-an-optional-placement)).
   A `Placed` operand with an `Ungridded` one gives `Placed`: the operation is
   pointwise, so it keeps the placed operand's geometry. A kept grid whose model names

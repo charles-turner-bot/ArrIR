@@ -105,7 +105,7 @@ pub enum GridModel {
 }
 
 /// Output index i on this axis is cell offset + step * i of the declared transform.
-/// A source declares offset 0 and step 1; only Select changes it.
+/// A source or a Warp target declares offset 0 and step 1; only Select changes it.
 pub struct IndexMap {
     pub offset: i64,
     pub step: i64,
@@ -230,7 +230,8 @@ require equal grid definitions. Two grids are equal when all of these are (decis
   - `Affine`: the transform bitwise and both index maps exactly;
   - `Rectilinear` and `Curvilinear`: the same entries at the same positions, with each
     pair of coordinates having the same origin by elementwise.md's coordinate rule.
-    `VarId`s are per schema, so names alone don't decide it.
+    `VarId`s are per schema, so names alone don't decide it. A coordinate with no
+    origin, such as a `Warp` output's, equals nothing, so two such grids are unequal.
 
 `GridId`s are ignored. Unequal definitions that describe the same geometry, such as
 the same CRS spelled differently, count as unequal. That can block a plan, never
@@ -356,9 +357,9 @@ Validation rules:
   distinguishes `Ungridded` from `Unresolved`.
 - A variable that is placed on a grid must also span the placement's two dimensions.
 
-**A grid with nothing placed on it is removed** from the schema, by every operation
-(decision C). Its coordinates are then `Ungridded`. [warp.md](warp.md) applies the same
-rule to the source grid.
+**A grid with no data variable placed on it is removed** from the schema, by every
+operation (decision C). Its coordinates are then `Ungridded`. [warp.md](warp.md) applies
+the same rule to the source grid.
 
 ## Select on a grid
 
@@ -382,10 +383,19 @@ with `o` and `t` for the index map's offset and step:
 
 | Effective | Value |
 | --- | --- |
-| origin | `x0 + (o + (1-t)/2)*dx`, `y0 + (o + (1-t)/2)*ry` |
-| steps | `t*dx`, `t*ry` |
+With the column map `(o_c, t_c)`, the row map `(o_r, t_r)`, and
+`a_c = o_c + (1 - t_c)/2`, `a_r = o_r + (1 - t_r)/2`, the declared transform
+`(x0, dx, rx, y0, ry, dy)` becomes:
 
-The row axis is the same, with `rx` and `dy` in place of `dx` and `ry`. rioxarray's
+| Effective | Value |
+| --- | --- |
+| `x0'` | `x0 + a_c*dx + a_r*rx` |
+| `y0'` | `y0 + a_c*ry + a_r*dy` |
+| `dx'`, `rx'` | `t_c*dx`, `t_r*rx` |
+| `ry'`, `dy'` | `t_c*ry`, `t_r*dy` |
+
+Both origin terms include both axes, so rotated and sheared grids work (checked: every
+selected cell keeps its centre exactly, for `t` in 1, -1, 2, -3 and 4). rioxarray's
 `rio.transform(recalc=True)` gives the same transform for `k = 1, 4, -1, -2` (checked).
 
 - **Each selected sample keeps its centre.** Cell `o + i*t` was centred at
@@ -403,7 +413,9 @@ The row axis is the same, with `rx` and `dy` in place of `dx` and `ry`. rioxarra
 - **A `Point` grid follows the same arithmetic.** Its samples keep their positions and
   only the spacing changes.
 - **An empty result (`M = 0`) keeps the placement and the index map.** With no cells, the
-  transform describes nothing. Staggered placements are removed (below).
+  transform describes nothing. The stored offset still depends on the normalised start,
+  so two empty selections can give unequal grids. Staggered placements are removed
+  (below).
 
 ### Rectilinear and curvilinear grids
 
@@ -416,8 +428,12 @@ arithmetic is needed.
 A staggered variable or coordinate on its own dimension (MOM6's `xq`, or a bounds
 dimension of length `N + 1`) isn't sliced when the centre dimension is. It keeps its
 placement only when the plan selects its dimension **in step** with the centre
-dimension. Otherwise its placement is removed. For a grid coordinate, the model's entry
-for that position is removed with it.
+dimension. Otherwise its placement is removed, including when the staggered dimension
+is selected and the centre dimension isn't. For a grid coordinate, the model's entry for
+that position is removed with it. "In step" is judged within one `Select` node:
+`Select { xh: a..b }` followed by `Select { xq: a..b+1 }` removes the placement at the
+first node, so [select.md](select.md)'s pushdown rule 3 doesn't merge selections on
+different axes of one grid.
 
 For a slice of `k = ±1` on the centre dimension with `M > 0`, "in step" means selecting
 the points at that position that belong to the selected cells, in the same order:
@@ -501,12 +517,16 @@ So the rules are known before the variants exist:
 
 - **`Project`** (decision B). An `Array` keeps only coordinates whose dimensions are in
   its payload's ([elementwise.md](elementwise.md)'s `CoordinateOutsidePayload`), as
-  xarray does: MOM6's `ds["u"]` on `(yh, xq)` keeps `geolon_u` and drops `geolon` on
-  `(yh, xh)` and `geolon_c` on `(yq, xq)` (checked). `Project::Array` removes the model
-  entries whose coordinates it drops. If the `Centre` entry of a `Rectilinear` or
-  `Curvilinear` model would go, it is `GridCoordinateOutsidePayload`. `Affine` grids
-  have no coordinate entries and are unaffected. `Project::Dataset` keeps whatever
-  grids its variables are placed on, by the removal rule above.
+  xarray does. If the payload is placed on a grid and spans both of the grid's centre
+  dimensions, `Project::Array` keeps the grid and removes the model entries whose
+  coordinates it drops (staggered entries on other dimensions). Otherwise the grid
+  would refer to dimensions the `Array` lacks, which
+  [schema-and-values.md](schema-and-values.md) forbids, so it is
+  `ProjectError::GridCoordinateOutsidePayload` ([dag.md](dag.md)). This covers every
+  grid kind, `Affine` included. MOM6's `ds["u"]` on `(yh, xq)` is rejected for now:
+  xarray keeps only `geolon_u` and drops `geolon` on `(yh, xh)` and `geolon_c` on
+  `(yq, xq)` (checked). `Project::Dataset` of `u` keeps the grid. A later loosening
+  could instead drop the placement and give `Ungridded`.
 - **`Reduce`** over a grid dimension removes every placement on that grid, as a scalar
   does, with or without `keepdims` (decision K).
 - **`Rename`** of a grid dimension renames it in the grid and in every placement.
@@ -676,9 +696,10 @@ recommendations, after an independent review. Q numbers are the earlier question
   schemas when loosened later.
 - **Q8. A position list or mask on DGGS `All` or `Range`** removes the placement.
 - **A. Affine `Select` changes integer index maps,** and only adapters compute `f64`.
-- **B. `Project::Array`** drops model entries outside the payload's dimensions, and
-  rejects when a `Centre` entry would go.
-- **C. A grid with nothing placed on it is removed,** for every operation.
+- **B. `Project::Array`** keeps a grid only when the payload spans its centre
+  dimensions, dropping model entries outside the payload. Otherwise it rejects
+  (`GridCoordinateOutsidePayload`); dropping to `Ungridded` is a possible loosening.
+- **C. A grid with no data variable placed on it is removed,** for every operation.
 - **D. A label on a grid's dimension** makes the grid's placements `Unresolved` and
   removes the grid until label resolution.
 - **E. CF bounds** stay ordinary coordinates in the first subset.

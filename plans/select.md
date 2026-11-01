@@ -258,6 +258,9 @@ A label `Select` stays representable without coordinates (design.md, purity rule
    they don't merge:
    `x[-5:][[3]]` raises at length 3 but gives element 6 at length 8, and `x[0:2][[3]]`
    raises where `x[[3]]` may not. Literal masks compose. Computed indexers don't merge.
+   Selections on different axes of one grid don't merge, because a staggered
+   placement's "in step" status is judged per `Select` node
+   ([grids.md](grids.md#staggered-dimensions)).
 4. **Past `Cast` and `Project`,** for any indexer. Past a `Reduce`, only on axes the
    `Reduce` keeps.
 5. **Not pushed:** label selections (they change the value number, shapes.md),
