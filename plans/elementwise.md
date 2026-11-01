@@ -45,8 +45,8 @@ pub enum Function {
     Abs,
     Square,
     Divide,
-    FloorDivide, // integers only
-    Remainder,   // integers only
+    FloorDivide { zero_divisor: ZeroDivisor }, // integers only
+    Remainder { zero_divisor: ZeroDivisor },   // integers only
     Pow,         // integers only
     Maximum,
     Minimum,
@@ -165,16 +165,30 @@ and `FloorDivide`: `abs(int8 -128)` and `int8 -128 // -1` are both `-128`.
 
 | Case | Array API 2025.12 | NumPy 2.5.4 (checked) | ArrIR |
 | --- | --- | --- | --- |
-| integer `FloorDivide` by 0 | "unspecified and thus implementation-defined" | `0` | `0` (question 2) |
-| integer `Remainder` by 0 | implementation-defined | `0` | `0` (question 2) |
+| integer `FloorDivide` by 0 | "unspecified and thus implementation-defined" | `0` | `zero_divisor` (decision 2) |
+| integer `Remainder` by 0 | implementation-defined | `0` | `zero_divisor` (decision 2) |
 | integer `FloorDivide` rounding | toward −∞ | `-7 // 2` is `-4` | toward −∞ |
 | integer `Remainder` sign | the divisor's | `-7 % 2` is `1` | the divisor's |
 | `INT_MIN // -1` | not stated | wraps to `INT_MIN` | wraps |
 | integer `Pow` with a negative exponent | unspecified | `ValueError` | rejected in the plan (above) |
 
-Division by zero is defined as NumPy and dask define it rather than rejected: every
-integer division would otherwise be rejected, because a plan can't prove a divisor
-non-zero (question 2). Other engines differ: JAX gives `[-2, -2, -1]` for
+The result of a zero divisor is stated on the node rather than fixed by ArrIR. A plan
+can't prove a divisor non-zero, so rejecting would reject every integer division, and
+a single fixed definition couldn't change once plans relied on it:
+
+```rust
+/// What integer FloorDivide and Remainder give for a zero divisor.
+pub enum ZeroDivisor {
+    /// x // 0 and x % 0 are 0, as in NumPy and dask (checked).
+    Zero,
+}
+```
+
+There is no default. Lowering writes its host's rule; NumPy and dask lower to `Zero`. A
+host with another rule is rejected at lowering until a variant for it is added (for
+example `EngineError`, raised at execution like select.md's `PositionOutOfRange`, for
+torch). Adding a variant never changes what an existing plan means. Other engines
+differ: JAX gives `[-2, -2, -1]` for
 `[7, -7, 0] // 0` and torch raises `ZeroDivisionError` (checked), and `INT_MIN // -1`
 traps in C and in x86's `idiv`. In an eager engine, `Where(d == 0, 0, x // d)` still
 evaluates `x // 0`, so the guard must replace the divisor too:
@@ -183,8 +197,8 @@ evaluates `x // 0`, so the guard must replace the divisor too:
 Where(d == 0, 0, x // Where(d == 0, 1, d))
 ```
 
-with the same treatment for `INT_MIN // -1`. An engine that can't emit the guard
-rejects.
+with the same treatment for `INT_MIN // -1` (`INT_MIN % -1` is `0` in NumPy, checked,
+and also traps in C). An engine that can't produce `Zero` this way rejects it.
 
 ## Floating point
 
@@ -242,7 +256,12 @@ accept only what has an unambiguous meaning:
 
 ## The output schema
 
-Each operand must be an array: `ResultKind::Array`, or a `Constant`. A dataset operand
+Each operand must be an array: `ResultKind::Array`, or a `Constant`. An array operand's
+payload must have the `Data` role. A coordinate payload (`ds.x + 1`) is
+`CoordinatePayload`: xarray gives a payload `x` of `[11, 21, 31]` beside a coordinate
+`x` of `[10, 20, 30]` (checked), and the two would share one `VarId`. cast.md rejects
+the `Cast` for `ds.x + 1.5` for the same reason. xarray can't put that DataArray in a
+Dataset either (`to_dataset` raises). A dataset operand
 is `DatasetOperand`: xarray applies dataset arithmetic per variable, which would need a
 `Merge` that doesn't exist yet (decision 5). A binding that holds a single NumPy or
 Array API array is an `Open` of a one-variable dataset, which is projected to an
@@ -252,7 +271,8 @@ so it reaches an elementwise node as `Project::Array`.
 - **Shape:** [shapes.md](shapes.md#broadcasting), with operands in input order.
 - **Dtype:** promotion, then the domain table above.
 - **Payload variable name.** If every operand that isn't a `Constant` has the same
-  payload `VarId`, the output keeps it. Otherwise it is the fixed `VarId` `result`.
+  payload `VarId`, the output keeps it. Otherwise it is the fixed `VarId` `result`,
+  which lowering reserves: a host variable named `result` is renamed on the way in.
   This is ArrIR's rule, not xarray's: xarray ignores NumPy operands (`t + nd` is named
   `t`), takes `xr.where`'s name from the condition, and drops the name for an unnamed
   0-d operand (checked). The xarray lowering inserts a `Rename` where the host's name
@@ -283,6 +303,10 @@ so it reaches an elementwise node as `Project::Array`.
     drop (decision 3).
   - An index coordinate that several operands share but that isn't the same is
     `SharedIndexCoordinate` until #34 establishes label equality (decision 4).
+  - Selections are compared after merging adjacent ones into one canonical form, as
+    [select.md](select.md)'s pushdown rule 3 allows, so `x[0:20][0:10]` and `x[0:10]`
+    give the same origin. Merging the selections of one operand only, as #37 may, then
+    can't change the output schema.
 - **Grids.** The output's `SpatialState` is `Unresolved` if any operand's is. Placed
   operands must have equal grid definitions; unequal ones are rejected, as
   [dag.md](dag.md#id-scope-across-opens) requires. Equal definitions at one location give
@@ -302,6 +326,7 @@ pub enum ElementwiseError {
     OperandDomain { node: NodeId, input: usize, function: Function, dtype: DType },
     IntegerPowSignedExponent { node: NodeId },
     DatasetOperand { node: NodeId, input: usize },
+    CoordinatePayload { node: NodeId, input: usize },
     UnsupportedMissing { node: NodeId, input: usize },
     MixedNanMissing { node: NodeId },
     PayloadNameCollision { node: NodeId, variable: VarId },
@@ -365,7 +390,7 @@ one-variable dataset and projected to an `Array`; named ones come from xarray.
 | --- | --- | --- |
 | NumPy `a + b`, `a` `f32 (n, 1)`, `b` `f32 (1, m)` | `Open(a)`, `Project::Array`, `Open(b)`, `Project::Array`, `Add` | positional `f32 (n, m)`; payload `result` when the host gives `a` and `b` different `VarId`s |
 | NumPy `i8 + i8` at `127 + 1` | `Add` | `-128`: wraps |
-| NumPy `i32 // i32` with a zero divisor | `FloorDivide` | `0` at that element (question 2) |
+| NumPy `i32 // i32` with a zero divisor | `FloorDivide { zero_divisor: Zero }` | `0` at that element |
 | NumPy `i32 ** i32` | rejected at lowering: signed exponent | |
 | NumPy `bool + bool` | `LogicalOr` | `bool` |
 | NumPy `i32_array + 1.5` | `Cast(i32 → f64)`, `Constant f64 1.5`, `Add` ([dtypes.md](dtypes.md#python-scalars-and-constants)) | `f64` |
@@ -387,6 +412,10 @@ recommendations, after an independent review:
 
 1. **Integer overflow:** wrapping is the semantics of the variants, with saturating or
    trapping arithmetic as separate functions if needed.
+2. **Integer division by zero:** stated per node by `ZeroDivisor`, with one variant,
+   `Zero`, for now and no default. Charles chose an explicit enum over a fixed
+   definition or leaving integer division out, so other hosts' rules can be added as
+   variants later.
 3. **Shared auxiliary coordinates:** kept when they have the same origin, otherwise
    dropped. A kept grid that needs a dropped coordinate is rejected.
 4. **Shared index coordinates:** kept when they have the same origin, otherwise
@@ -401,11 +430,3 @@ recommendations, after an independent review:
    `Unknown` result.
 9. **Float `Pow`, `FloorDivide` and `Remainder`:** deferred; integer only for now.
 10. **Different grid locations:** rejected, not `Ungridded`.
-
-Still open:
-
-2. **Question for Charles: integer division by zero.** *Recommended:* define integer
-   `FloorDivide` and `Remainder` by zero as `0`, as NumPy and dask do; JAX and torch
-   adapters guard. The alternative keeps both out of slice 2 until a use case appears,
-   because the definition can't change once plans rely on it. Choosing the alternative
-   moves the two variants to "Not yet" and deletes their rows above.

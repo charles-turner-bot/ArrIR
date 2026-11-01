@@ -61,9 +61,14 @@ is specific to elementwise functions:
 Integer `sum` and `prod` may be reordered under `Sequential`, because integers wrap at
 the accumulator's width, and `min`/`max` no longer wait for #32.
 
-**Question for Charles:** integer `FloorDivide` and `Remainder` by zero give `0`, as in
-NumPy and dask, with JAX and torch adapters guarding (recommended), or both stay out of
-slice 2 until a use case appears. See [elementwise.md](elementwise.md#decisions).
+**Integer division by zero:** Charles chose an explicit `ZeroDivisor` field on integer
+`FloorDivide` and `Remainder`, with one variant, `Zero` (NumPy and dask), and no
+default. Other hosts' rules become new variants later.
+
+**Coordinate payloads:** `ds.x + 1` is rejected (`CoordinatePayload`). xarray allows a
+DataArray named after one of its coordinates but can't put it in a Dataset; making it
+representable, or adding a replace-coordinate operation for `ds.assign(x=ds.x + 1)`,
+is future work.
 
 Evidence: NumPy 2.5.4, xarray 2026.9.0, dask 2026.8.0, JAX 0.12.0.1 and torch 2.15.0,
 run 1 November 2026 on macOS arm64, for integer overflow, division by zero, float floor

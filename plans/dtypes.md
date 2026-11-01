@@ -113,7 +113,7 @@ operand domains, overflow, division by zero and special values.
 | `logical_and`, `logical_or`, `logical_not` | `bool` | `bool` | `bool` operands only |
 | `divide` | promoted float | integer inputs "implementation-dependent" | integer operands rejected; lowering casts (NumPy gives `f64`) |
 | `floor_divide` | promoted | integer division by zero "implementation-defined" | promoted; division by zero is #32's |
-| `pow` | promoted | integer base with negative integer exponent, and integer base with float exponent, "implementation-dependent" | promoted; mixed kinds cast; negative integer exponents are #32's |
+| `pow` | promoted | integer base with negative integer exponent, and integer base with float exponent, "implementation-dependent" | promoted; mixed kinds cast; integer only, float `pow` deferred and negative integer exponents rejected ([elementwise.md](elementwise.md)) |
 | `min`, `max` | input dtype | same as input | input dtype, no accumulator |
 | `any`, `all` | `bool` | `bool` | `bool`, no accumulator |
 | `count_nonzero` | integer | "the default array index data type" | the counter dtype lowering states (NumPy: `i64`) |
