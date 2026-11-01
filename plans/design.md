@@ -294,7 +294,7 @@ do not omit a semantic field or its tests to satisfy the line count.
    - dtype inference and reduction accumulation: design #30 (`dtypes.md`, #47),
      implementation #31;
    - the first elementwise operations, `Add`, `Multiply` and `Greater`: design #32
-     ([elementwise.md](elementwise.md), proposed), implementation #33, using both of the
+     ([elementwise.md](elementwise.md), decided), implementation #33, using both of the
      above.
 8. An xrexpr adapter for this subset, first with import/export round-trip tests. Then a
    GDAL adapter for `Open`, positional `Select` and `Warp`, tested against `gdal.Warp`

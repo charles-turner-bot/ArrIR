@@ -246,7 +246,7 @@ nothing has a default. `OutOfRange` is cast.md's enum, not a second one.
 4. **`sum` and `prod` accept any numeric accumulator.** The empty sum is 0 and the empty
    product is 1. Integer overflow behaves as `add` and `multiply` do. Wrapping
    overflow makes integer results independent of order; trapping or saturating
-   overflow doesn't. [elementwise.md](elementwise.md#integer-overflow-wraps) proposes
+   overflow doesn't. [elementwise.md](elementwise.md#integer-overflow-wraps) decides
    wrapping (#32).
 
 ### Order
@@ -261,10 +261,10 @@ dimensions.
 
 | Reduction | Under `Sequential` | Under `Unspecified` |
 | --- | --- | --- |
-| `sum`, `prod` | none allowed with a float accumulator; all allowed with an integer one, because integers wrap ([elementwise.md](elementwise.md#integer-overflow-wraps), proposed) | all allowed. Partial reductions keep the accumulator, and only the final combine converts to `result`. Merging needs both reductions `Unspecified`, with the same accumulator, and the inner one's `result` equal to its accumulator |
+| `sum`, `prod` | none allowed with a float accumulator; all allowed with an integer one, because integers wrap at the accumulator's width ([elementwise.md](elementwise.md#integer-overflow-wraps)) | all allowed. Partial reductions keep the accumulator, and only the final combine converts to `result`. Merging needs both reductions `Unspecified`, with the same accumulator, and the inner one's `result` equal to its accumulator |
 | `mean` | none allowed | split through `sum` and a count; merge only when every group has the same count, which needs #39's missing-value facts |
 | `count_nonzero` | all allowed: integer counting doesn't depend on order | all allowed |
-| `min`, `max`, `any`, `all` | all allowed, once #32 fixes NaN and signed-zero handling | all allowed, on the same condition |
+| `min`, `max`, `any`, `all` | all allowed: `min` and `max` combine as `Minimum` and `Maximum`, which propagate NaN and order `-0` below `+0` ([elementwise.md](elementwise.md#floating-point)), so the result doesn't depend on order | all allowed |
 
 **Adapters expose or reject.** An engine that can't guarantee `Sequential` rejects it.
 NumPy, for example, sums pairwise along a contiguous inner axis. An `Unspecified`
