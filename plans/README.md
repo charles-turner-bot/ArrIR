@@ -20,6 +20,8 @@ This directory preserves the reasoning behind ArrIR, not just a list of features
 - [Symbolic shapes](shapes.md): proposed. Named and positional axes, known, symbolic
   and unknown extents, and broadcasting by name or by position, with requirements
   checked at bind, label resolution or execution.
+- [Array API coverage](array-api-coverage.md): proposed. How each Array API 2025.12
+  function maps onto ArrIR, and which concepts are missing.
 - [26 October 2026 discussion](2026-10-26-discussion.md): why the old scaffold is
   being replaced and the constraints Charles set for the rebuild.
 - [27 October 2026 discussion](2026-10-27-discussion.md): reconciling #16 and #17 with
