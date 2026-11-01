@@ -4,6 +4,8 @@ This directory preserves the reasoning behind ArrIR, not just a list of features
 
 - [Design contract and incremental roadmap](design.md): the agreed architecture,
   source mapping, boundaries and implementation sequence.
+- [Logical schemas and values](schema-and-values.md): decided. Result kinds, stored
+  axes and extents, typed values, unknown facts, missingness and the decoding boundary.
 - [arrir-layout](chunked-layout.md): the storage-layout component, a Rust binding of
   the byterefs specification.
 - [Grids, CRS and staggering](grids.md): proposed. How the schema represents spatial
@@ -31,9 +33,12 @@ This directory preserves the reasoning behind ArrIR, not just a list of features
   this contract: purity rules, the dependency graph, `Open`, and the byterefs layout.
 - [28 October 2026 discussion](2026-10-28-discussion.md): GDAL as a target, and grids,
   CRS and staggering in the schema.
+- [30 October 2026 discussion](2026-10-30-discussion.md): schema extension points
+  and a bounded first implementation.
 - [31 October 2026 discussion](2026-10-31-discussion.md): why plans become DAGs, and
   the 1 November decisions on the graph, shapes and dtypes.
-- [1 November 2026 discussion](2026-11-01-discussion.md): the elementwise family.
+- [1 November 2026 discussion](2026-11-01-discussion.md): the second design round,
+  including the decided schema and the elementwise family.
 
 Update these notes when a decision changes, stating what changed and why.
 Distinguish proposed designs from implemented behaviour. Passing type/unit tests

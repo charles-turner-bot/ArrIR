@@ -21,9 +21,9 @@ else.
 - **#15** (workspace): `BindingId`, `VarId` and `DimId` from `arrir-types`. The new
   `NodeId` lives in `arrir`, not `arrir-types`, because schemas never refer to nodes.
 - **#26** (schema and values): each node's output is a `Schema` with a `ResultKind`.
-  This proposal uses #26's `Schema`, `ResultKind`, `ArrayResult`, `Extent` and
-  `TypeKnowledge` as written there and adds no schema types. If #26 changes, the
-  examples change with it.
+  This proposal uses #26's `Schema`, `ResultKind`, `ArrayResult` and `TypeKnowledge`
+  ([schema-and-values.md](schema-and-values.md)), and shapes.md's `Extent`, and adds no
+  schema types. The wire example below follows #26's revised form.
 - **#16** (shells): its purity rules and conventions are already in the contract. Its
   per-operation effects become per-node effects here, with one footprint per input.
   Nothing in this proposal depends on #16's code.
@@ -221,16 +221,18 @@ in #32, and until then it's rejected rather than guessed.
 
 ## ID scope across Opens
 
-Neither #15 nor #26 says how far a `DimId`, `VarId` or `GridId` reaches. With one
-`Open` it didn't matter. With two, both datasets can have a `time` dimension and a
-`temp` variable, and the plan has to say whether they're the same thing.
+#15 and #26 as first proposed didn't say how far a `DimId`, `VarId` or `GridId`
+reaches; #26 now defers to this section. With one `Open` it didn't matter. With two,
+both datasets can have a `time` dimension and a `temp` variable, and the plan has to
+say whether they're the same thing.
 
 **Decision: named dimensions are plan-wide; variables and grids are per schema.**
 
-- **`DimId` is plan-wide, for named axes.** An axis is `AxisName::Named(DimId) |
-  Positional`, as #46 defines. The same `DimId` on named axes in two `Open`s names one
-  axis. This is what named broadcasting (#46) needs, and it matches xarray, where
-  dimension names are the identity used for alignment. Positional axes, from NumPy and
+- **`DimId` is plan-wide, for named axes.** A schema stores an axis as
+  `VariableAxis::Named(DimId) | Positional(Extent)` (schema-and-values.md), and
+  inference views it as shapes.md's `Axis`. The same `DimId` on named axes in two
+  `Open`s names one axis. This is what named broadcasting (#46) needs, and it matches
+  xarray, where dimension names are the identity used for alignment. Positional axes, from NumPy and
   Array API hosts, carry no ID and are identified by trailing position (see #46,
   shapes.md); the rules below about shared `DimId`s don't apply to them.
 - **A shared `DimId` asserts axis identity, nothing more.** It doesn't say the
@@ -430,9 +432,10 @@ for a self-loop, `[7]` gives `DanglingInput { node: 1, input: 7 }`, and `[]` giv
       "op": { "Open": { "binding": "obs", "schema": {
         "result": "Dataset",
         "variables": [
-          { "id": "t", "dims": ["time", "lat"], "role": "Data", "dtype": { "Known": "Float32" } }
+          { "id": "t", "dims": [{ "Named": "time" }, { "Named": "lat" }],
+            "role": "Data", "dtype": { "Known": "Float32" } }
         ],
-        "sizes": [["time", "365"], ["lat", "180"]],
+        "sizes": [["time", { "Known": "365" }], ["lat", { "Known": "180" }]],
         "grids": []
       } } },
       "inputs": []
@@ -451,8 +454,8 @@ Wire rules:
 - `id` is written out for readability and must equal the node's position. It exists
   only on the wire.
 - `NodeId` is a `u32`, written as a JSON number, which every host reads exactly.
-  Extents and other 64-bit values stay decimal strings, as #26 says. Question 10 asks
-  whether to use one rule for all integers instead.
+  Every other integer, extents and scalars included, is a decimal string
+  ([schema-and-values.md](schema-and-values.md#wire-contract-and-first-proof)).
 - Dead nodes may appear on the wire. Adapters and hosts ignore them. Export doesn't
   require compaction.
 - An unknown `version` or operation tag fails import.
@@ -503,6 +506,7 @@ Each question was proposed with a recommendation. Charles accepted all of them o
    grid's dimension names. The alternatives are a `Rename` before the `Warp`, so the
    target needs no reused names, or that each grid owns its dimensions, so dimensions
    on differently defined grids must always have different names.
-10. **Integer encoding.** Decided: `NodeId` as a JSON number and 64-bit values as
-    decimal strings. The alternative is decimal strings for all integers, which the #26
-    review suggested; this proposal follows whichever rule #26 settles.
+10. **Integer encoding.** Decided: `NodeId` as a JSON number. #26 settles the rest:
+    every integer is a decimal string, except an enumerated list of `u32` structural
+    indices that includes `NodeId`
+    ([schema-and-values.md](schema-and-values.md#wire-contract-and-first-proof)).

@@ -115,7 +115,7 @@ a row says verified:
 | --- | --- | --- | --- |
 | gdalwarp, integer working type (`-wt` set to the output type) | `NearestTiesUp` | `Clamp` | `Nudge` |
 | gdalwarp, float working type, integer output | `NearestTiesAway` | `Clamp` | `Keep` (the nudge is undone by rounding) |
-| gdalwarp, float working type, float output | none needed | `Infinity` (verified) | `Nudge` |
+| gdalwarp, float working type (`Float64` unless `Nearest`), float output | none needed | `Infinity` (verified) | `Nudge` |
 | ordinary conversion (a `Cast` with no warp), integer output | `NearestTiesAway` | `Clamp` | `Keep` |
 | ordinary conversion, float output | none needed | none: clamps infinities too, so rejected | `Keep` |
 
@@ -124,11 +124,18 @@ The GDAL adapter rejects any other combination.
 "Verified" means checked by experiment, on 1 November 2026, with GDAL 3.13.3 (Python
 bindings) and NumPy 2.5.4, narrowing a `float64` raster to `Float32`:
 
-- **gdalwarp and a warped VRT** (`gdal.Warp`, also with `format="VRT"`), the same with
-  `-r near` and `bilinear` and with `-wt Float64` or `Float32`: `1e39` → `inf`,
-  `-1e39` → `-inf`, `3.5e38` → `inf`, `inf` → `inf`, `-inf` → `-inf`, NaN → NaN,
-  `FLT_MAX` and `nextafter(FLT_MAX)` → `FLT_MAX`, `1.5` → `1.5`. This is IEEE 754
-  overflow, the same as NumPy's `astype`, so the row is `Infinity`.
+- **gdalwarp and a warped VRT** (`gdal.Warp`, also with `format="VRT"`), with
+  `-wt Float64` and `-r near` or `bilinear`, and with `-wt Float32` and `-r near`:
+  `1e39` → `inf`, `-1e39` → `-inf`, `3.5e38` → `inf`, `inf` → `inf`, `-inf` → `-inf`,
+  NaN → NaN, `FLT_MAX` and `nextafter(FLT_MAX)` → `FLT_MAX`, `1.5` → `1.5`. This is
+  IEEE 754 overflow, the same as NumPy's `astype`, so the row is `Infinity`.
+- **gdalwarp with `-wt Float32` and an interpolating resampler** (`bilinear`, `cubic`):
+  the narrowing itself is still `Infinity`, but a finite neighbour of a value that is
+  infinite in the working type becomes NaN. In `[1, 2, 1e39, 4, 5, inf, 7, 8]`, the `2`
+  and the `5` come out as NaN. With `-wt Float64` the neighbours are unchanged. The
+  same happens to a `float32` source under gdalwarp's default working type, with no
+  `Cast` at all. So the adapter always passes `-wt Float64` for a float source with any
+  method other than `Nearest` ([gdal-adapter.md](gdal-adapter.md#how-it-emits-a-warp)).
 - **gdal_translate and a plain VRT** (`gdal.Translate`, GTiff or VRT): `1e39` →
   `FLT_MAX`, `-1e39` → `-FLT_MAX`, `3.5e38` → `FLT_MAX`, and also `inf` → `FLT_MAX` and
   `-inf` → `-FLT_MAX`; NaN → NaN. This clamps genuine infinities as well, so it matches
@@ -139,6 +146,7 @@ A standalone `Cast` that narrows to `float32` uses GDAL's ordinary conversion, w
 `OutOfRange` variant describes, so the adapter rejects it (purity rule 4; decided
 1 November, [dtypes.md](dtypes.md#decisions) question 9). A `float32` output that needs
 no narrowing is unaffected. If a real case needs that conversion, a "clamp including
-infinities" variant could be added. The #42 fixture for the meaning check in
-[gdal-adapter.md](gdal-adapter.md#done-when) should encode these same cases, so that a
-GDAL upgrade that changes either behaviour is caught.
+infinities" variant could be added.
+[fixtures/gdal/float32_narrowing.py](../fixtures/gdal/float32_narrowing.py) asserts all
+three behaviours and fails if a GDAL upgrade changes any of them. It is a seed for the
+#42 corpus that the meaning check in [gdal-adapter.md](gdal-adapter.md#done-when) uses.

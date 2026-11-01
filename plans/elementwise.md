@@ -173,8 +173,8 @@ with `Where(divisor == 0, 0, x // divisor)`, or reject.
   NaN (checked).
 - **NaN propagates** through arithmetic. Comparisons with NaN are `false`, except
   `NotEqual`, which is `true` (checked). NaN payloads aren't significant
-  ([#26](https://github.com/charles-turner-bot/ArrIR/pull/26)), so which operand's
-  payload survives doesn't matter.
+  ([schema-and-values.md](schema-and-values.md#dtypes-and-scalar-values)), so which
+  operand's payload survives doesn't matter.
 - **`Maximum` and `Minimum` propagate NaN**, as Array API requires ("If either `x1_i`
   or `x2_i` is `NaN`, the result is `NaN`"). Array API leaves the order of signed zeros
   "implementation-defined"; ArrIR orders `-0` below `+0`, as IEEE 754-2019's `maximum`
