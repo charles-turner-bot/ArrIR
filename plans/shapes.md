@@ -69,11 +69,15 @@ pub enum SizeTerm {
     /// Broadcasting several size symbols together. Sorted, without duplicates and with
     /// nested `Broadcast` terms flattened, so operand order doesn't matter.
     Broadcast { of: Vec<SizeSymbol> },
-    /// A label `Select` not yet resolved to positions (design.md conventions).
-    LabelSelect { node: NodeId, dim: DimId },
-    /// The number of true values in a computed mask (#36's CountNonZero).
-    CountNonZero { mask: NodeId },
+    /// A label `Select` not yet resolved to positions (design.md conventions), applied
+    /// to the value numbered `input`.
+    LabelSelect { input: ValueNumber, dim: DimId, labels: LabelIndexer },
+    /// The number of true values in the mask whose value is numbered `mask` (#36).
+    CountNonZero { mask: ValueNumber },
 }
+
+/// Value numbering (below): equal operations on equally numbered inputs get one number.
+pub struct ValueNumber(u32);
 
 pub struct SizeTable {
     /// Indexed by `SizeSymbol`. Append-only, like the node arena.
@@ -81,8 +85,10 @@ pub struct SizeTable {
 }
 ```
 
-`SizeSymbol` lives in `arrir-types` next to `Extent`, so schemas don't depend on
-`arrir`. `SizeTerm` and `SizeTable` live in `arrir`, beside the derived-schema cache.
+`SliceSpec` and `LabelIndexer` are the indexer values of roadmap step 4 (#3 for
+positional ones). `SizeSymbol` lives in `arrir-types` next to `Extent`, so schemas
+don't depend on `arrir`. `SizeTerm` and `SizeTable` live in `arrir`, beside the
+derived-schema cache.
 Neither the table nor derived schemas go on the wire, matching dag.md's "derived
 schemas are never stored". Inference walks nodes in id order, so the same plan always
 numbers its size symbols the same way.
@@ -92,26 +98,40 @@ below `a + a` gives both new `Select` nodes the term `Slice { of: s, slice: 0..1
 which is one size symbol, so the rewritten add is still proven. Keyed by node, the
 two slices would be two size symbols and the add would become unresolved.
 
-Two terms still use a node, because their value depends on data, not only on other
-extents:
+**Slices are normalised when interned.** A full slice `..` with step 1 is `s` itself,
+not a new term. Nested slices compose when the result is exact for every length: both
+with non-negative bounds and positive steps, so `Slice { Slice { s, 0..10 }, 2..5 }` is
+`Slice { s, 2..5 }`. Negative bounds depend on the length and don't always compose
+(`s[-5:][:3]` and `s[-5:-2]` differ when `s < 5`), so those stay nested. Without this,
+merging adjacent selections, one of xrexpr's first rewrites, would change the terms.
 
-- **`CountNonZero`** depends on the mask's values. Rewrites that leave the mask node in
-  place keep its size symbol.
-- **`LabelSelect`** depends on the coordinate it reads. Its structural key would be the
-  indexer, the dimension and the identity of that index coordinate, but coordinate
-  identity is #34's to define. Until then it is keyed by node, so pushing a label
-  `Select` mints a new size symbol, and #37's first proof covers positional selection
-  only.
+### Value numbering for data-dependent terms
+
+Two terms depend on data, not only on other extents: `CountNonZero` on a mask's
+values, and `LabelSelect` on the coordinates of the value it selects from. They are
+keyed by a *value number*, not a node:
+
+- An `Open`'s value number is its binding.
+- Any other node's value number interns its operation together with its inputs' value
+  numbers. Two nodes with the same operation on equally numbered inputs get one number.
+
+A mask shared by two branches has one value number however it's reached, so both
+branches get the same `CountNonZero` size symbol. A path copy (dag.md) has new inputs,
+so it would get a new number. When a rewrite is checked (below), its replacement node
+takes the value number of the node it replaces, since the rewrite claims they have one
+value. Path copies above it then re-intern to the original numbers.
+
+Value numbering is an analysis of size symbols, not a merge of nodes. dag.md's rule
+that equal nodes are never merged automatically still holds: the nodes stay distinct,
+and only the size symbols they produce coincide. Equal value numbers imply equal
+values; different numbers imply nothing, so the analysis can miss an equality but never
+invent one. Pushing a label `Select` below an add still changes its input's value
+number, so #37's first proof covers positional selection only, and full coordinate
+identity stays with #34.
 
 `Declared` uses the binding, not the `Open` node. dag.md counts only live `Open`s per
 binding, so a rewrite may append a replacement `Open` of the same binding; it keeps the
 same size symbols, because it opens the same data.
-
-**Path copies keep node-keyed terms.** dag.md's path copying re-appends every node
-between a rewritten node and the root. A re-appended node computes the same value as
-the node it copies, so when a rewrite compares requirement sets, a `LabelSelect` or
-`CountNonZero` term on a copied node stands for the same term on the original. The
-rewrite knows which nodes it copied; nothing extra is stored in the graph.
 
 ### Where size symbols come from and where they go
 
@@ -186,7 +206,11 @@ the requirement `s ∈ {1, 0}`.
 Broadcasting `n` operands, for `where` and the rest of #32, is a left fold over pairs:
 `a, b, c` combines `a` with `b`, then the result with `c`. Each step records its own
 requirements. `Broadcast` terms are flattened, sorted and deduplicated, so `(a, b, c)`
-and `(c, a, b)` give the same size symbol for each axis.
+and `(c, a, b)` give the same size symbol for each axis, and their requirements
+normalise to the same set (see [Rewrites](#rewrites-keep-requirements-exactly)).
+Whether reordering or reassociating the operands is *allowed* is a numerics question
+(strict floating-point order, design.md and #47); this only says the shape
+requirements then agree.
 
 ### Proven, contradicted, unresolved
 
@@ -197,12 +221,14 @@ and `(c, a, b)` give the same size symbol for each axis.
 
 ```rust
 pub enum ShapeRequirement {
-    /// `left = right`, or either is 1.
-    Broadcastable { node: NodeId, dim: DimId, left: Extent, right: Extent },
-    /// `left = right` exactly, for example a mask's length and its dimension (#36).
-    Equal { node: NodeId, dim: DimId, left: Extent, right: Extent },
-    /// A staggered dimension's length is its centre dimension's plus `delta` (grids.md).
-    StaggerOffset { node: NodeId, centre: Extent, staggered: Extent, delta: i8 },
+    /// Every pair of members is equal, or one of the pair is 1. Unordered: the
+    /// members are sorted, with `Broadcast` size symbols expanded into theirs.
+    Broadcastable { node: NodeId, dim: DimId, members: Vec<Extent> },
+    /// The two extents are equal, for example a mask's length and its dimension (#36).
+    /// Unordered.
+    Equal { node: NodeId, dim: DimId, pair: [Extent; 2] },
+    /// `staggered_dim`'s length is `centre_dim`'s plus `delta` (grids.md).
+    StaggerOffset { node: NodeId, centre_dim: DimId, staggered_dim: DimId, delta: i8 },
 }
 ```
 
@@ -229,10 +255,18 @@ centre's (question 8).
 
 ### Rewrites keep requirements exactly
 
-A rewrite must leave the requirement set unchanged, compared by content (kind and
-extents, ignoring node IDs, with path copies standing for the nodes they copy). Fewer requirements would let a plan that fails at bind
-run instead; more would make a plan that bound fine fail. Structural size symbols are
-what make "unchanged" achievable for selection pushdown.
+A rewrite must leave the meaning of the requirement set unchanged. Fewer requirements
+would let a plan that fails at bind run instead; more would make a plan that bound
+fine fail. Requirement sets are compared in a normal form, ignoring node IDs:
+
+- each `Broadcastable` becomes the unordered pairs of its members, after expanding
+  `Broadcast` size symbols, and pairs that are already proven are dropped;
+- each `Equal` is an unordered pair;
+- the result is a set, so duplicates from different nodes count once.
+
+So `a + b` and `b + a` agree, and so do `(a + b) + c` and `a + (b + c)`: both give the
+pairs `{a, b}`, `{a, c}` and `{b, c}`. Structural size symbols, normalised slices and
+value numbering are what make "unchanged" achievable for selection pushdown.
 
 A rewrite whose legality depends on which operand stretches needs that pair to be
 proven, not unresolved. dag.md's pushdown of `Select { time }` below an `Add` doesn't
@@ -254,10 +288,18 @@ pub enum ShapeError {
 }
 
 /// Returned by the core's requirement check once the facts are supplied.
-pub struct RequirementViolated {
-    pub requirement: ShapeRequirement,
-    pub resolved_left: u64,
-    pub resolved_right: u64,
+pub enum RequirementViolated {
+    /// The first pair of members that is neither equal nor contains a 1.
+    NotBroadcastable { node: NodeId, dim: DimId, left: u64, right: u64 },
+    NotEqual { node: NodeId, dim: DimId, left: u64, right: u64 },
+    StaggerMismatch {
+        node: NodeId,
+        centre_dim: DimId,
+        centre: u64,
+        staggered_dim: DimId,
+        staggered: u64,
+        delta: i8,
+    },
 }
 ```
 
@@ -277,7 +319,7 @@ Each operand is an array; the axes are written as `name: extent`.
 4. **`(n,) + (m,)` from two `Open`s.** Left `(x: s)`, right `(x: t)`. Output
    `(x: u)` with `u = Broadcast { of: [s, t] }`, and the requirement `s = t` or `s = 1` or
    `t = 1`. Binding `s = 10, t = 10` gives `u = 10`; `s = 1, t = 7` gives `u = 7`;
-   `s = 10, t = 7` is `RequirementViolated` at bind, before execution.
+   `s = 10, t = 7` is `RequirementViolated::NotBroadcastable` at bind, before execution.
 5. **`(n,) + (n,)` from one `Open`.** Both operands share the `Open`'s size symbol `s`
    for `x`. Output `(x: s)`, proven.
 6. **Zero size.** `(y: 0) + (y: 0)` gives `(y: 0)`. `(y: 0, x: 3) + (x: 3)` gives
@@ -357,3 +399,7 @@ None of these reads data, and the tests assert that.
 8. **Staggered offsets.** A `StaggerOffset` requirement (as written), or an offset term
    `s + delta` so an outer dimension's size symbol derives from its centre's?
    **Recommended: the requirement,** until a rewrite needs to reason about offsets.
+9. **Value numbering for data-dependent terms.** Key `CountNonZero` and `LabelSelect`
+   by value number (as written), so shared masks and path copies keep their size
+   symbols, or by node, which is simpler but makes any rewrite near a mask or label
+   selection turn proven pairs into unresolved ones? **Recommended: value numbering.**

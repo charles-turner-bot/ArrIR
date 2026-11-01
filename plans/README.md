@@ -16,7 +16,8 @@ This directory preserves the reasoning behind ArrIR, not just a list of features
 - [Plans as DAGs](dag.md): proposed. Nodes with ordered inputs, stable IDs and one
   root, replacing linear unary chains.
 - [Symbolic shapes](shapes.md): proposed. Known, symbolic and unknown extents, and
-  Array API broadcasting with requirements checked at bind time.
+  Array API broadcasting, with requirements checked at bind, label resolution or
+  execution.
 - [26 October 2026 discussion](2026-10-26-discussion.md): why the old scaffold is
   being replaced and the constraints Charles set for the rebuild.
 - [27 October 2026 discussion](2026-10-27-discussion.md): reconciling #16 and #17 with

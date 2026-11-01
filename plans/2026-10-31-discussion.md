@@ -46,13 +46,15 @@ Details in [shapes.md](shapes.md). All pending review.
   `Unknown`; inference turns each one into a size symbol, so `a + a` is provably
   compatible without knowing `a`'s length.
 - **Size symbols are identified by structure,** not by node, so the same slice of the
-  same extent is one size symbol and pushdown keeps its proofs.
+  same extent is one size symbol and pushdown keeps its proofs. Mask counts and label
+  selections are keyed by value numbering, which never merges nodes.
 - **Broadcasting follows the Array API**, aligned from the last axis, with n operands
   as a left fold. Whether the core also requires aligned axes to share a `DimId` is
   left for review, with a recommendation. Named broadcasting stays with #34.
 - **Unresolved isn't an error.** A pair that can't be proven compatible records a
   requirement. The core checks it when its facts arrive: at bind, at label resolution
-  or at execution. Rewrites must keep the requirement set unchanged.
+  or at execution. Rewrites must keep the requirement set's meaning, compared as
+  unordered pairs.
 - **No Broadcast node and no constraint solver** for now.
 
 ## Not settled
