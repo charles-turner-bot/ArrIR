@@ -7,6 +7,11 @@ implement every future variant. It builds on the decided [dag.md](dag.md),
 [shapes.md](shapes.md) and [dtypes.md](dtypes.md), and links to them rather than
 restating their rules.
 
+Implemented so far, in `arrir-types`: `Schema`, `ResultKind`, `Variable`,
+`VariableAxis`, roles, `DType`, `TypeKnowledge`, a declared `Extent` (`Known` and
+`Unknown`) and structural validation. Missing values, scalars, spatial state and grids
+follow in later PRs.
+
 ## Design rule
 
 Use an enum where alternatives have different meaning. Give an option-bearing variant

@@ -1,6 +1,6 @@
 [package]
 name = "arrir-types"
-description = "Shared value types for ArrIR: portable symbol IDs"
+description = "Shared value types for ArrIR: portable symbol IDs and logical schemas"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,6 +8,7 @@ repository.workspace = true
 
 [dependencies]
 serde.workspace = true
+thiserror.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true
