@@ -98,12 +98,13 @@ Added on 27 October:
 - **Components form a dependency graph, not a sequence of layers** (see
   [Architecture](#architecture)).
 
-Proposed on 28 October, designed in [grids.md](grids.md):
+Proposed on 28 October, designed in [grids.md](grids.md). The grid items below were
+decided on 1 November; `Warp` and the GDAL adapter are still proposed:
 
 - **GDAL is a target.** A plan must be able to lower to GDAL VRT, not only to
   xarray-shaped hosts. That needs grids in the schema, `Select` effects on grids, a
   `Warp` operation and a GDAL adapter, proposed in that order as stacked PRs.
-- **Grids are schema entities.** A grid owns its dimensions, the CRS, the pixel
+- **Grids are schema entities.** A grid names its dimensions, the CRS, the pixel
   interpretation and a declared coordinate model (affine, rectilinear or curvilinear).
   Spatial variables, and their coordinate variables, refer to a grid.
 - **Staggering is part of the schema from the start.** Each gridded variable records its

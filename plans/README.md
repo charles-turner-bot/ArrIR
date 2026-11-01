@@ -8,8 +8,8 @@ This directory preserves the reasoning behind ArrIR, not just a list of features
   axes and extents, typed values, unknown facts, missingness and the decoding boundary.
 - [arrir-layout](chunked-layout.md): the storage-layout component, a Rust binding of
   the byterefs specification.
-- [Grids, CRS and staggering](grids.md): proposed. How the schema represents spatial
-  grids, the first step towards lowering plans to GDAL.
+- [Grids, CRS and staggering](grids.md): decided, with two questions for Mike. How the
+  schema represents spatial grids, how each operation changes them, and grid equality.
 - [Warp](warp.md): proposed. Reprojection and regridding between grids, with
   resampling defined independently of any engine.
 - [Cast](cast.md): decided, revised by #38. Type conversion with rounding,

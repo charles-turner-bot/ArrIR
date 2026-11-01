@@ -149,3 +149,34 @@ Evidence: NumPy 2.5.4, xarray 2026.9.0, dask 2026.8.0, JAX 0.12.0.1 and torch 2.
 run 1 November 2026 on macOS arm64, for integer overflow, division by zero, float floor
 division, `pow` accuracy against mpmath, NaN comparisons, `maximum` and signed zeros,
 result names and coordinate handling.
+
+## Grids
+
+[grids.md](grids.md), proposed on 28 October (#20–#23), was reviewed against the
+decided docs and is now decided, except two questions for Mike on ocean-model
+positions. The main changes:
+
+- **Affine `Select` changes integer index maps,** not the `f64` transform. Composing
+  two slices in `f64` gave different bits from the merged slice in 600 of 2500 cases,
+  so merging selections would have changed the grid and broken grid equality.
+- **Grid equality is defined:** CRS text and axis order, kind, dimensions, pixel
+  interpretation and model, ignoring `GridId`.
+- **The affine transform is declared, never derived** from centre coordinates, which is
+  inference and fails to round-trip in `f64`.
+- **CF bounds stay ordinary coordinates.** Converting them needs a value check, and
+  cf_xarray silently accepts bounds whose cells don't share edges.
+- **Operations' effects on grids are stated:** `Project::Array` keeps a grid only when
+  its payload spans the grid's centre dimensions and otherwise rejects
+  (`GridCoordinateOutsidePayload`, so MOM6's `ds["u"]` is rejected for now; Charles
+  decided the array should eventually keep its grid, tracked in #63). `Reduce`
+  removes placements, a label on a grid dimension makes it `Unresolved`, and a grid with
+  no data variable placed on it is removed. A re-check found the first draft rejected
+  its own MOM6 example and let pushdown merge change "in step" results; selections on
+  different axes of one grid no longer merge.
+- **Strides with `|k| > 1` and empty selections remove staggered placements,** including
+  NEMO-style staggering on the centre dimension.
+- **WKT2_2019 is the stored CRS form;** GCPs, RPCs and byterefs `affine` grids wait.
+- **H3 cell IDs are always listed;** `All` and `Range` are HEALPix-only.
+
+Evidence: xarray 2026.9.0, rioxarray 0.24.0, odc-geo 0.5.3, xgcm 0.10.1, cf_xarray
+0.11.3, xdggs 0.7.0, h3 4.5.0, pyproj 3.8.0 and GDAL 3.13.3, run 1 November 2026.
