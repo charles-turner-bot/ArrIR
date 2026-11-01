@@ -1,8 +1,8 @@
 # Plans as DAGs
 
 Status: decided 1 November 2026, for issue #27 (proposed 31 October). It replaces the
-"start with linear unary chains" decision in [design.md](design.md#decisions). Nothing
-here is implemented yet; #28 implements it.
+"start with linear unary chains" decision in [design.md](design.md#decisions). The arena,
+structural validation and wire form are implemented in `crates/arrir` (#28, PR #59).
 
 ## Why a chain isn't enough
 
@@ -35,8 +35,9 @@ Positional semantics referred to here (broadcasting, via #29 and #46) follow the
 ## The plan
 
 ```rust
-/// A node's position in its graph. Never reused.
-pub struct NodeId(u32);
+/// A node's position in its graph. Never reused. The field is public: an ID is only a
+/// position, and everything that takes one checks it against a graph.
+pub struct NodeId(pub u32);
 
 pub struct Node {
     pub operation: Operation,
