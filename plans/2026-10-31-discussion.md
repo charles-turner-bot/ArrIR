@@ -54,9 +54,10 @@ Details in [shapes.md](shapes.md). All pending review.
   Named shapes align by name, as xarray 2026.9.0 does without coordinates: shared dims
   must have equal extents, a dim on one side only is created on the other, and the
   output takes the first operand's dims then the new ones. A positional operand adopts
-  a named operand's names but may not stretch a named length-1 axis. No broadcast node,
-  and `expand_dims` is positional only. Decided by Charles, 1 November, after xarray
-  experiments. Coordinate label alignment stays with #34.
+  a named operand's names but may not stretch a named length-1 axis. Decided by
+  Charles, 1 November, after xarray experiments. Named shapes therefore need no
+  `expand_dims`. Coordinate label alignment stays with #34. Whether any Broadcast node
+  is needed is still a recommendation (no).
 - **Unresolved isn't an error.** A pair that can't be proven compatible records a
   requirement. The core checks it when its facts arrive: at bind, at label resolution
   or at execution. Rewrites must keep the requirement set's meaning, compared as

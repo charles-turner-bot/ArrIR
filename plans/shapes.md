@@ -304,8 +304,7 @@ break a plan that was valid.
 
 ### More than two operands
 
-`where` and the rest of #32 take `n` operands. They combine in two stages, which is what
-xarray's `apply_ufunc` does:
+`where` and the rest of #32 take `n` operands. They combine in two stages:
 
 1. **Named operands** combine by name, as a left fold in operand order. Shared dims must
    agree and new dims are appended, so the output order is each dim's first appearance
@@ -316,10 +315,28 @@ xarray's `apply_ufunc` does:
    named result of stage 1, under the two conditions above. If there are no named
    operands, the result is positional.
 
-Adoption is against the combined named shape, not against whichever named operand comes
-next. With `x(x: 3)`, `y(y: 3)` and a positional `p(3,)`, `p` aligns with `y`, the last
-axis of `(x, y)`, in every operand order that keeps `x` before `y`. Folding `p` with
-`x` first would have aligned it with `x` instead, which is why the stages are separate.
+Adoption is against the combined named shape, not against any single named operand.
+This surprises users: `nd(2, 3) + yx(y: 2, x: 3)` is fine on its own, but
+`where(cond(x: 3), nd(2, 3), yx(y: 2, x: 3))` fails, because `cond` puts `x` first and the
+combined order is `(x: 3, y: 2)`, against which `(2, 3)` doesn't fit. Likewise, with
+`x(x: 3)`, `y(y: 3)` and a positional `p(3,)`, `p` aligns with `y`, the last axis of
+`(x, y)`, whatever position `p` has among the operands.
+
+Evidence from xarray 2026.9.0 with NumPy 2.5.4, where `cond` and `x` are on `(x: 3)`,
+`yx` on `(y: 2, x: 3)` and `nd` is a NumPy array:
+
+| Expression | xarray | Here |
+| --- | --- | --- |
+| `where(cond, yx, x)` | `(x, y)` | same |
+| `where(cond, x, yx)` | `(x, y)` | same |
+| `where(cond, nd(2, 3), yx)` | `ValueError`: shapes (3,1) (2,3) (3,2) can't broadcast | `IncompatibleExtents` |
+| `where(nd_bool(3,), x, yx)` | `ValueError`: shapes (3,) (3,1) (3,2) | `IncompatibleExtents` |
+| `where(cond, x, nd(2, 3))` | `ValueError`: unexpected number of dimensions | `PositionalOutranksNamed` |
+
+The first two rows show named operands combining in first-appearance order. The third
+and fourth show positional operands aligned from the right against that combined
+order. The last shows a positional operand with more axes than the named result
+rejected.
 
 Within each stage, acceptance and requirements don't depend on order. `Broadcast` terms
 are flattened, sorted and deduplicated, so the size symbols agree; the requirements
