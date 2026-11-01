@@ -108,25 +108,37 @@ pub enum Collision {
 
 ## What gdalwarp can emit
 
-From Mike's reading of the GDAL source, still to be checked by fixtures:
+From Mike's reading of the GDAL source, still to be checked by fixtures, except where
+a row says verified:
 
 | GDAL path | `Rounding` | `OutOfRange` | `Collision` |
 | --- | --- | --- | --- |
 | gdalwarp, integer working type (`-wt` set to the output type) | `NearestTiesUp` | `Clamp` | `Nudge` |
 | gdalwarp, float working type, integer output | `NearestTiesAway` | `Clamp` | `Keep` (the nudge is undone by rounding) |
-| gdalwarp, float working type, float output | none needed | `Infinity`, unverified | `Nudge` |
+| gdalwarp, float working type, float output | none needed | `Infinity` (verified) | `Nudge` |
 | ordinary conversion (a `Cast` with no warp), integer output | `NearestTiesAway` | `Clamp` | `Keep` |
-| ordinary conversion, float output | none needed | `Infinity`, unverified | `Keep` |
+| ordinary conversion, float output | none needed | none: clamps infinities too, so rejected | `Keep` |
 
 The GDAL adapter rejects any other combination.
 
-"Unverified" means nobody has yet checked which `OutOfRange` GDAL applies when it
-narrows to `float32`. Until someone does, the adapter rejects these rows (decided
-1 November, [dtypes.md](dtypes.md#decisions) question 9, under purity rule 4). So a
-`Cast` that narrows to `float32`, alone or after a `Warp`, is rejected for now. A
-`float32` output that needs no narrowing, such as a `Warp` of `float32` data, is
-unaffected. The cell is settled by the meaning check in
-[gdal-adapter.md](gdal-adapter.md#done-when), using a #42 fixture with values beyond
-the `float32` range. That fixture lifts the rejection: if GDAL overflows to infinity,
-the cell becomes `Infinity`; if it clamps, the cell becomes `Clamp`, and plans asking
-for `Infinity` stay rejected.
+"Verified" means checked by experiment, on 1 November 2026, with GDAL 3.13.3 (Python
+bindings) and NumPy 2.5.4, narrowing a `float64` raster to `Float32`:
+
+- **gdalwarp and a warped VRT** (`gdal.Warp`, also with `format="VRT"`), the same with
+  `-r near` and `bilinear` and with `-wt Float64` or `Float32`: `1e39` → `inf`,
+  `-1e39` → `-inf`, `3.5e38` → `inf`, `inf` → `inf`, `-inf` → `-inf`, NaN → NaN,
+  `FLT_MAX` and `nextafter(FLT_MAX)` → `FLT_MAX`, `1.5` → `1.5`. This is IEEE 754
+  overflow, the same as NumPy's `astype`, so the row is `Infinity`.
+- **gdal_translate and a plain VRT** (`gdal.Translate`, GTiff or VRT): `1e39` →
+  `FLT_MAX`, `-1e39` → `-FLT_MAX`, `3.5e38` → `FLT_MAX`, and also `inf` → `FLT_MAX` and
+  `-inf` → `-FLT_MAX`; NaN → NaN. This clamps genuine infinities as well, so it matches
+  neither `Infinity` nor `Clamp`, under which infinities stay infinite.
+
+So a `Warp` followed by a `Cast` that narrows to `float32` renders, with `Infinity`.
+A standalone `Cast` that narrows to `float32` uses GDAL's ordinary conversion, which no
+`OutOfRange` variant describes, so the adapter rejects it (purity rule 4; decided
+1 November, [dtypes.md](dtypes.md#decisions) question 9). A `float32` output that needs
+no narrowing is unaffected. If a real case needs that conversion, a "clamp including
+infinities" variant could be added. The #42 fixture for the meaning check in
+[gdal-adapter.md](gdal-adapter.md#done-when) should encode these same cases, so that a
+GDAL upgrade that changes either behaviour is caught.

@@ -103,8 +103,11 @@ decided some directly and accepted the recommendation on the rest:
 - **Dtypes** ([dtypes.md](dtypes.md#decisions)). Charles decided directly that reductions
   carry a separate `result` dtype. Mixed kinds are rejected, and reductions declare their
   order with no default.
-- **GDAL float narrowing** is rejected until a #42 fixture verifies what gdalwarp does
-  ([cast.md](cast.md#what-gdalwarp-can-emit)), under purity rule 4.
+- **GDAL float narrowing**: unverified cells are rejected, under purity rule 4. An
+  experiment with GDAL 3.13.3 then verified them. gdalwarp overflows to infinity, so
+  `Warp` + `Cast(f32)` renders. Ordinary conversion clamps infinities too, so a
+  standalone `Cast` to `float32` is rejected
+  ([cast.md](cast.md#what-gdalwarp-can-emit)).
 - **Array API coverage** ([array-api-coverage.md](array-api-coverage.md#decisions)).
   `where` joins #32's `Elementwise` family, and `concat` is the first new primitive.
   Complex dtypes stay deferred.
@@ -112,6 +115,7 @@ decided some directly and accepted the recommendation on the rest:
 ## Still open
 
 - The rewrite termination measure for graphs, which goes to #37.
-- GDAL's behaviour when it narrows to `float32`, which a #42 fixture settles.
+- A #42 fixture that encodes the GDAL narrowing cases, so a GDAL upgrade that changes
+  them is caught.
 - The schema in #26: it needs `Extent::Symbolic`, and axes that are named or positional,
   before dtypes.md's link to `schema-and-values.md` resolves.

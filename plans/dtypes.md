@@ -427,7 +427,7 @@ question on 1 November 2026.
    constant's own schema. The alternative is a host-chosen `VarId` on `Constant`, which
    would carry a name such as xarray's `DataArray(2, name="k")` but adds a field almost
    nobody uses.
-9. **Unverified GDAL cells.** cast.md's GDAL table marks float narrowing's
+9. **Unverified GDAL cells.** cast.md's GDAL table marked float narrowing's
    `OutOfRange::Infinity` as unverified. The docs first said such cells are rendered
    and settled later by the #42 meaning fixture. The options were:
    - **Render now**. `Warp` + `Cast(f32)` and standalone float casts
@@ -436,5 +436,8 @@ question on 1 November 2026.
    - **Reject until the #42 fixture confirms the cell.** This honours purity rule 4, at
      the cost of every `float32` output from GDAL until the fixture lands.
 
-   *Decided:* reject until the fixture. cast.md and gdal-adapter.md reject those cells;
-   the #42 fixture lifts the rejection once it confirms gdalwarp's behaviour.
+   *Decided:* reject the unverified cells. An experiment on 1 November (GDAL 3.13.3)
+   then resolved them: gdalwarp and warped VRTs overflow to infinity, so `Warp` +
+   `Cast(f32)` renders with `Infinity`. GDAL's ordinary conversion clamps infinities as
+   well, which no `OutOfRange` variant describes, so a standalone `Cast` to `float32` is
+   rejected. Details are in [cast.md](cast.md#what-gdalwarp-can-emit).
