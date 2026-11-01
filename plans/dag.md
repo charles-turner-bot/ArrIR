@@ -21,45 +21,76 @@ else.
 - **#15** (workspace): `BindingId`, `VarId` and `DimId` from `arrir-types`. The new
   `NodeId` lives in `arrir`, not `arrir-types`, because schemas never refer to nodes.
 - **#26** (schema and values): each node's output is a `Schema` with a `ResultKind`.
-  This proposal uses #26's `Schema`, `ResultKind`, `Extent` and `TypeKnowledge` as
-  written there and adds no schema types. If #26 changes, the examples change with it.
+  This proposal uses #26's `Schema`, `ResultKind`, `ArrayResult`, `Extent` and
+  `TypeKnowledge` as written there and adds no schema types. If #26 changes, the
+  examples change with it.
 - **#16** (shells): its purity rules and conventions are already in the contract. Its
   per-operation effects become per-node effects here, with one footprint per input.
   Nothing in this proposal depends on #16's code.
 
+Positional semantics referred to here (broadcasting, via #29) follow the
+[Array API 2025.12](https://data-apis.org/array-api/2025.12/) standard, observed on
+31 October 2026.
+
 ## The plan
 
 ```rust
-/// A node's position in its plan's arena. Plan-local and never reused.
+/// A node's position in its graph. Never reused.
 pub struct NodeId(u32);
 
 pub struct Node {
-    pub id: NodeId,
     pub operation: Operation,
     /// Ordered. `inputs[0]` is the first operand; each operation documents the
     /// meaning of each position.
     pub inputs: Vec<NodeId>,
 }
 
+/// Append-only. The field is private, so nodes can be added but never changed
+/// or removed.
+pub struct Graph {
+    nodes: Vec<Node>,
+}
+
+impl Graph {
+    /// Checks the node's inputs and arity, then returns its new ID.
+    pub fn append(&mut self, node: Node) -> Result<NodeId, PlanError> { … }
+    pub fn node(&self, id: NodeId) -> &Node { … }
+}
+
+/// What is exported and executed: a graph and the node whose value is the result.
 pub struct Plan {
-    pub nodes: Vec<Node>,
+    pub graph: Graph,
     pub root: NodeId,
 }
 ```
 
-`Operation` is the existing exhaustive enum (`Open`, `Project`, `Select`, `Reduce`,
-`Warp`, `Cast`, and later #32's elementwise family). Operations hold their options;
-nodes hold the edges. Data is never embedded: inputs are other nodes, and external
-data enters only through `Open`.
+`Operation` is the exhaustive `Operation` enum (proposed; variants land per the
+roadmap). None exists in the replacement IR yet. The variants named here are
+illustrative: design.md's extraction table lists `Open`, `Project`, `Select`, `Reduce`,
+`Scan`, `Rename`, `Drop` and `Rechunk`, and the proposals add `Warp`, `Cast` and #32's
+elementwise family. Operations hold their options; nodes hold the edges. A node's ID is its position, so it isn't stored in the
+node. Array data is never embedded: inputs are other nodes, and *external* data enters
+only through `Open` (and, until [question 7](#questions-for-review) is settled,
+`Warp`'s `GeometryBinding`). A literal scalar, such as the `2` in `a * 2`, is a
+zero-input node with no binding. #47 proposes it as `Constant(Scalar)`, with the
+operation defined in #32 and its wire form following #26's scalar encoding. This
+contract only allows such nodes; it doesn't decide them.
+
+**Who owns the nodes.** A `Graph` owns them. A rewrite takes `&mut Graph` and a root,
+appends to the graph in place, and returns a new root. Nothing is copied or removed, so
+every `NodeId` handed out earlier still indexes the same node. Several roots, the
+original and each rewrite's result, can live in one graph at once. A `Plan` pairs the
+graph with the one root being exported or executed.
 
 ### Rules
 
 1. **Append-only.** A node is never changed or removed once added. Its `NodeId` is its
-   index in `nodes`.
+   index in the graph.
 2. **Inputs point backwards.** Every input of node `n` is less than `n`. This makes
    cycles unrepresentable: id order is a topological order, and validation is one pass
    with no graph search.
-3. **Arity is declared by the operation.**
+3. **Arity comes from the operation value.** `Operation::arity(&self) -> Arity` looks
+   at the operation's fields, not just its variant.
 
    ```rust
    pub enum Arity {
@@ -68,70 +99,85 @@ data enters only through `Open`.
    }
    ```
 
-   `Open` is `Exactly(0)`, `Project`, `Reduce` and `Cast` are `Exactly(1)`, a binary
-   elementwise function is `Exactly(2)`, a `Select` with a computed mask (#36) is
-   `Exactly(2)`, and a future `Concat` is `AtLeast(1)`. The input count must match.
-4. **One root.** A plan computes one result, the value of `root`. A host wanting
-   several results builds several plans over the same nodes (see
+   `Open` is `Exactly(0)`, as is a literal scalar node (#47). `Project`, `Cast` and an unweighted `Reduce` are
+   `Exactly(1)`; a weighted `Reduce` is `Exactly(2)`, its weights being the second
+   input. A `Select` takes one input plus one per array-valued indexer, such as a
+   computed mask (#36). A binary elementwise function is `Exactly(2)`, and a future
+   `Concat` is `AtLeast(1)`. The input count must match.
+4. **One root per plan.** A plan computes one result, the value of `root`. Several
+   results share work by being several roots in one graph (see
    [questions](#questions-for-review)).
 5. **Sharing is explicit.** `Add` with inputs `[1, 1]` uses one value twice. Operations
    are pure, so an adapter may evaluate a shared node once or twice; how often is
    execution policy, not meaning.
-6. **One `Open` per binding.** A `BindingId` is opened by at most one node. A second
-   use of the same data refers to that node. This rules out two `Open`s of one binding
-   with different declared schemas.
+6. **One live `Open` per binding.** Among the nodes reachable from a plan's root, a
+   `BindingId` is opened by at most one node. A second use of the same data refers to
+   that node. Dead nodes don't count, so a rewrite may append a replacement `Open` for
+   the same binding, for example to push a projection into the source. A host binds
+   only live `Open`s.
 7. **No implicit merging.** Two structurally equal nodes stay two nodes. Merging them
    (common subexpression elimination) is a rewrite, never a side effect of building.
 
 ### Structural validation
 
-Validation checks every node, reachable or not, and reports the first failure with
-its node ID:
+`Graph::append` checks rules 2 and 3 for each node as it arrives. Validating a `Plan`
+(on import, or before export) checks every node in the graph against rules 2 and 3,
+then checks the root and rule 6 over the live nodes:
 
 ```rust
 pub enum PlanError {
     Empty,
-    IdNotPosition { position: u32, id: NodeId },
-    DanglingInput { node: NodeId, input: NodeId },   // input >= nodes.len()
-    ForwardInput { node: NodeId, input: NodeId },    // node <= input < nodes.len()
+    DanglingInput { node: NodeId, input: NodeId },   // input >= graph length
+    ForwardInput { node: NodeId, input: NodeId },    // node <= input < graph length
     WrongArity { node: NodeId, expected: Arity, found: usize },
-    DuplicateBinding { binding: BindingId, first: NodeId, second: NodeId },
     RootOutOfRange { root: NodeId },
+    DuplicateBinding { binding: BindingId, first: NodeId, second: NodeId },
 }
 ```
 
-A self-loop is a `ForwardInput` whose input equals its node. These are structural
-errors only. Whether facts are known enough for an operation (semantic readiness) and
-whether an engine can run it (adapter acceptance) are the separate questions #26
-defines.
+Validation reports the first failure: nodes in ascending order, and for each node the
+errors in the order listed. Root and binding errors come after all node errors. A
+self-loop is a `ForwardInput` whose input equals its node. Wire import also rejects a
+node whose written `id` isn't its position (see [Wire form](#wire-form)); that's an
+import error, not a `PlanError`, because in memory the ID is the position.
+
+These are structural errors only. Whether facts are known enough for an operation
+(semantic readiness) and whether an engine can run it (adapter acceptance) are the
+separate questions #26 defines.
 
 ### Reachability and deletion
 
 The *live* plan is the set of nodes reachable from `root`. Unreachable nodes are
 logically deleted: schema propagation, readiness checks, rewrites, adapters and
-execution ignore them. They still pass structural validation, so the arena stays sound.
+execution ignore them. They still pass rules 2 and 3, so the graph stays sound.
 
-**Compaction** is optional and explicit. It keeps the live nodes, renumbers them in
-post-order (a depth-first walk from `root`, visiting inputs in order, numbering a node
-after its inputs) and returns the old-to-new mapping. Compaction is the one operation
-that invalidates node IDs, which is why it returns the mapping and never runs
-implicitly. Two plans that describe the same graph compact to identical arenas, so the
-compacted form is the canonical one for comparison and fixtures.
+**Compaction** is optional, explicit, and not part of #28. It keeps the live nodes,
+renumbers them in post-order (a depth-first walk from `root`, visiting inputs in order,
+numbering a node after its inputs) and returns the old-to-new mapping. It's the one
+operation that invalidates node IDs, which is why it returns the mapping and never runs
+implicitly. Two plans that describe the same graph compact to identical node lists, so
+the compacted form is the canonical one for comparison once compaction exists.
 
 ### Rewrites keep old IDs and roots
 
-A rewrite appends replacement nodes and returns a plan with a new root. Existing nodes
-are untouched, so:
+A rewrite appends replacement nodes and returns a new root. Existing nodes are
+untouched, so:
 
 - a host holding an earlier `NodeId` still names the same computation;
 - the old root is still a valid root for the unrewritten plan;
 - a node shared with another consumer is unaffected when one consumer's path is
   rewritten. This is what makes pushdown safe in the presence of sharing.
 
-xrexpr's termination measure ("no rule lengthens a plan or moves an operation
-rightwards") is defined on chains. Pushing a `Select` below an `Add` adds a node, so the
-measure needs restating for graphs. That belongs to the first rewrite proof (#37), not
-to this contract.
+**Path copying.** Because nodes can't change, rewriting a node below the root means
+re-appending every node on the path from it up to the root, each pointing at its
+replaced input. Nodes off that path are reused as they are. See
+[Rewriting below the root](#rewriting-below-the-root).
+
+The arena therefore grows with every rewrite, so any termination measure applies to the
+live graph, not the arena. xrexpr's measure ("no rule lengthens a plan or moves an
+operation rightwards") was defined on chains, and pushing a `Select` below an `Add`
+adds a live node, so it needs restating for graphs. That belongs to the first rewrite
+proof (#37), not to this contract.
 
 ### Derived schemas and caching
 
@@ -151,9 +197,22 @@ region to one input region per input, in input order.
 
 `Open { binding, schema }` keeps its contract: it binds a dataset, and its declared
 schema has `ResultKind::Dataset`. A binding that holds a single array is a dataset with
-one data variable. Choosing a variable is a `Project` node, whose output has
-`ResultKind::Array`. One `Open` can feed several projections, which is how two variables
-from one file meet in one expression.
+one data variable.
+
+`Project` keeps both forms from design.md's extraction table, because array versus
+dataset is observable:
+
+```rust
+pub enum Project {
+    /// One variable. Output is `ResultKind::Array(ArrayResult { variable })`.
+    Array(VarId),
+    /// A subset of variables, in this order. Output is `ResultKind::Dataset`.
+    Dataset(Vec<VarId>),
+}
+```
+
+One `Open` can feed several projections, which is how two variables from one file meet
+in one expression.
 
 Each operation states which result kinds it accepts. Elementwise arithmetic on arrays
 comes first; dataset arithmetic (xarray applies it per variable) needs its own decision
@@ -176,19 +235,28 @@ Neither #15 nor #26 says how far a `DimId`, `VarId` or `GridId` reaches. With on
   positionally checks extents where it combines them, and known extents must agree
   there (or broadcast, per #29). Making differently labelled axes agree is alignment,
   which #34 lowers to explicit selection nodes before the combining operation.
-- **`VarId` is scoped to one node's schema.** `Project { variable }` names a variable
-  in its single input's schema, so two `temp`s in two `Open`s never meet in one name
-  lookup. Where an operation's output has to name a variable from several inputs, that
-  operation states the rule (#32 for elementwise results; a future `Merge` rejects
-  collisions or requires a rename).
-- **`GridId` is scoped to one node's schema too.** Whether two `Open`s share a grid is
-  checked by comparing their declared grid definitions, not by matching IDs. A shared
-  ID across bindings would claim the CRS and transform are equal without checking.
+- **`VarId` is scoped to one node's schema.** `Project` names variables in its single
+  input's schema, so two `temp`s in two `Open`s never meet in one name lookup. Where an
+  operation's output has to name a variable from several inputs, that operation states
+  the rule (#32 for elementwise results; a future `Merge` rejects collisions or
+  requires a rename).
+- **`GridId` is scoped to one node's schema too.** Two `Open`s can each declare a grid
+  `g` with different CRSs, or identical grids with different names. Whether two inputs
+  share a grid is checked by comparing grid definitions, never IDs. The operation that
+  combines inputs names the grids in its output: #32 for elementwise, #34 where
+  alignment is involved.
+- **Unequal grids under one dimension are rejected when combined.** If a shared
+  `DimId` is placed on grids with unequal definitions in two inputs, an operation that
+  combines them rejects the plan, as it would for unequal known extents. A `Warp` onto
+  one grid first resolves it. Each `Open` on its own stays valid.
 - **Different axes with one name are renamed at lowering.** If `model`'s `time` is
   really forecast lead time, the host lowers it as `lead` and keeps its own name map,
   as design.md already requires for host symbols. Qualifying IDs by binding
   (`model.time`) was rejected: nodes after a `Project` or an `Add` have no single
   binding, and xarray results carry plain names.
+- **`Rename` moves an axis between identities.** Renaming `time` to `t2` on one
+  branch makes it a different axis from `time` elsewhere in the plan. Renaming it to a
+  name already in use asserts it's the same axis as that one.
 - **Rewrites never rename dimensions.** Because a `DimId` is shared, a rewrite that
   moves a `Select { time }` below an `Add` must select on every input that has `time`.
   The index for each input is derived from the broadcast mapping, not copied: a
@@ -203,8 +271,8 @@ Worked example, `obs.temp + model.temp`:
 | --- | --- | --- | --- |
 | 0 | `Open { binding: obs }` | — | `temp (time: 365, lat: 180)` |
 | 1 | `Open { binding: model }` | — | `temp (time: 360, lat: 180)` |
-| 2 | `Project { variable: temp }` | 0 | Array `temp (time: 365, lat: 180)` |
-| 3 | `Project { variable: temp }` | 1 | Array `temp (time: 360, lat: 180)` |
+| 2 | `Project::Array(temp)` | 0 | Array `temp (time: 365, lat: 180)` |
+| 3 | `Project::Array(temp)` | 1 | Array `temp (time: 360, lat: 180)` |
 | 4 | elementwise add | 2, 3 | rejected: known `time` extents 365 and 360 differ |
 
 Both `Open`s are valid, and `time` and `lat` are each one axis. Node 4 fails because
@@ -213,9 +281,9 @@ through #34 instead: selection nodes on 2 and 3 that bring `time` to the matched
 then the add. If `model`'s `time` were lead time, the host would lower it as `lead`, and
 the add would broadcast to `(time, lat, lead)` under #34's named rules instead.
 
-`Warp`'s target geometry stays a `GeometryBinding` field ([warp.md](warp.md)) for now.
-It's a declared requirement on external geometry, not a value computed in the plan.
-Whether it becomes an `Open` input is a review question below.
+`Warp`'s target geometry is a `GeometryBinding` field in [warp.md](warp.md). It's a
+declared requirement on external geometry, not a value computed in the plan. Question 7
+recommends making it an `Open` input.
 
 ## Python table or Rust arena
 
@@ -231,7 +299,7 @@ The issue asks whether the graph should be an immutable Python node table or a R
 | Learning cost here | None in Rust | An ordinary `Vec` and index type |
 
 **Recommendation: the Rust arena is the plan.** Hosts keep their own expression
-objects and lower them by appending to a Rust builder, which returns a `NodeId` for each
+objects and lower them by calling `Graph::append`, which returns a `NodeId` for each
 node. A Python list of node records that mirrors the wire format is fine as interchange,
 but it isn't a second validator. The arena needs no lifetimes or pointers: a node refers
 to its inputs by index.
@@ -249,8 +317,8 @@ coordinate `time`.
 | Node | Operation | Inputs | Derived output |
 | --- | --- | --- | --- |
 | 0 | `Open { binding: obs, schema }` | — | Dataset `{t, u, time}` as declared |
-| 1 | `Project { variable: t }` | 0 | Array `t (time, lat)` |
-| 2 | `Project { variable: u }` | 0 | Array `u (time, lat)` |
+| 1 | `Project::Array(t)` | 0 | Array `t (time, lat)` |
+| 2 | `Project::Array(u)` | 0 | Array `u (time, lat)` |
 | 3 | elementwise add (#32) | 1, 2 | Array `(time, lat)`, dtype by #30 |
 | 4 | `Reduce { mean over time }` | 3 | Array `(lat)`, dtype by #30 |
 
@@ -262,14 +330,14 @@ node 0. One `Open` feeds both operands.
 | Node | Operation | Inputs |
 | --- | --- | --- |
 | 0 | `Open { binding: obs, schema }` | — |
-| 1 | `Project { variable: t }` | 0 |
+| 1 | `Project::Array(t)` | 0 |
 | 2 | elementwise add | 1, 1 |
 
 Root is 2. Node 2 adds `t` to itself. Two other spellings are worth comparing:
 
-- A second `Project { variable: t }` as node 2, then add `[1, 2]`. Valid. It denotes
-  the same value, but proving that is a rewrite's job (rule 7).
-- A second `Open { binding: obs }`. Rejected with `DuplicateBinding` (rule 6).
+- A second `Project::Array(t)` as node 2, then add `[1, 2]`. Valid. It denotes the
+  same value, but proving that is a rewrite's job (rule 7).
+- A second live `Open { binding: obs }`. Rejected with `DuplicateBinding` (rule 6).
 
 ### A rewrite that keeps old roots
 
@@ -278,11 +346,11 @@ Start from `Add(shared, shared)` plus a selection, root 3:
 | Node | Operation | Inputs |
 | --- | --- | --- |
 | 0 | `Open { binding: obs }` | — |
-| 1 | `Project { variable: t }` | 0 |
+| 1 | `Project::Array(t)` | 0 |
 | 2 | elementwise add | 1, 1 |
 | 3 | `Select { lat: 0..10 }` | 2 |
 
-Pushing the selection below the add appends two nodes and moves the root to 5:
+Pushing the selection below the add appends two nodes and returns root 5:
 
 | Node | Operation | Inputs |
 | --- | --- | --- |
@@ -290,10 +358,36 @@ Pushing the selection below the add appends two nodes and moves the root to 5:
 | 5 | elementwise add | 4, 4 |
 
 Nodes 0 to 3 are unchanged, and root 3 still names the original computation. Nodes 2
-and 3 are now unreachable from root 5, so they're logically deleted. Compacting from
-root 5 visits `0, 1, 4, 5` and returns `{0→0, 1→1, 4→2, 5→3}`; IDs 2 and 3 have no
-mapping. Whether this pushdown is legal is #37's to prove; the example shows only the
-structure.
+and 3 are unreachable from root 5, so they're logically deleted. Compacting from root 5
+visits `0, 1, 4, 5` and returns `{0→0, 1→1, 4→2, 5→3}`; IDs 2 and 3 have no mapping.
+Whether this pushdown is legal is #37's to prove; the example shows only the structure.
+
+### Rewriting below the root
+
+`mean(select(a + b))`, root 5:
+
+| Node | Operation | Inputs |
+| --- | --- | --- |
+| 0 | `Open { binding: obs }` | — |
+| 1 | `Project::Array(a)` | 0 |
+| 2 | `Project::Array(b)` | 0 |
+| 3 | elementwise add | 1, 2 |
+| 4 | `Select { lat: 0..10 }` | 3 |
+| 5 | `Reduce { mean over time }` | 4 |
+
+Pushing the selection below the add replaces node 4, which isn't the root. The
+`Reduce` above it must be re-appended too, because its input changes:
+
+| Node | Operation | Inputs |
+| --- | --- | --- |
+| 6 | `Select { lat: 0..10 }` | 1 |
+| 7 | `Select { lat: 0..10 }` | 2 |
+| 8 | elementwise add | 6, 7 |
+| 9 | `Reduce { mean over time }` | 8 |
+
+The new root is 9. Nodes 0 to 2 are reused. The live graph grew from six nodes
+(0 to 5) to seven (0, 1, 2, 6 to 9), and the arena from six to ten. Root 5 is still
+valid and unchanged.
 
 ### Cycles and dangling inputs
 
@@ -302,7 +396,7 @@ structure.
   "version": "0",
   "nodes": [
     { "id": 0, "op": { "Open": { "binding": "obs", "schema": "…" } }, "inputs": [] },
-    { "id": 1, "op": { "Project": { "variable": "t" } }, "inputs": [2] },
+    { "id": 1, "op": { "Project": { "Array": "t" } }, "inputs": [2] },
     { "id": 2, "op": { "Reduce": "…" }, "inputs": [1] }
   ],
   "root": 2
@@ -334,7 +428,7 @@ for a self-loop, `[7]` gives `DanglingInput { node: 1, input: 7 }`, and `[]` giv
       } } },
       "inputs": []
     },
-    { "id": 1, "op": { "Project": { "variable": "t" } }, "inputs": [0] },
+    { "id": 1, "op": { "Project": { "Array": "t" } }, "inputs": [0] },
     { "id": 2, "op": { "Elementwise": { "function": "Add" } }, "inputs": [1, 1] }
   ],
   "root": 2
@@ -343,41 +437,58 @@ for a self-loop, `[7]` gives `DanglingInput { node: 1, input: 7 }`, and `[]` giv
 
 Wire rules:
 
-- Nodes are serialised in id order. Serialising the same arena twice gives the same
-  bytes.
-- `id` is written out for readability and must equal the node's position.
-- `NodeId` is a `u32`, so it's an exact JSON number in every host. Extents and other
-  64-bit values stay decimal strings, as #26 says.
-- Dead nodes may appear on the wire. Export to an adapter or a fixture compacts first.
+- A wire plan is a graph and one root. Nodes are serialised in id order, so
+  serialising the same graph twice gives the same bytes.
+- `id` is written out for readability and must equal the node's position. It exists
+  only on the wire.
+- `NodeId` is a `u32`, written as a JSON number, which every host reads exactly.
+  Extents and other 64-bit values stay decimal strings, as #26 says. Question 10 asks
+  whether to use one rule for all integers instead.
+- Dead nodes may appear on the wire. Adapters and hosts ignore them. Export doesn't
+  require compaction.
 - An unknown `version` or operation tag fails import.
 
 ## Not in this proposal
 
 No scheduler, evaluation order, kernels, memoisation or embedded data. No elementwise
 vocabulary (#32), broadcasting (#29), dtype rules (#30) or index alignment (#34). The
-implementation is #28, after review.
+implementation is #28, after review; compaction is later still.
 
 ## Questions for review
 
+Each has a recommendation.
+
 1. **Sequencing.** Replace "linear unary chains first" now, so #28 builds the arena
-   before the first vertical slice? The slice's content doesn't change, only its
-   container.
-2. **Where inputs live.** This proposal puts an ordered `inputs` list on the node, with
-   arity checked per operation. The alternative is named fields on each operation
+   before the first vertical slice? Recommended: yes. The slice's content doesn't
+   change, only its container.
+2. **Where inputs live.** Recommended: an ordered `inputs` list on the node, with arity
+   checked per operation value. The alternative is named fields on each operation
    (`Add { left, right }`), which can't be misordered but needs a per-operation match
-   for every traversal. Which?
-3. **Node IDs.** A dense `u32` arena index, written on the wire and required to match
-   its position. The alternative is host-chosen string IDs, which need uniqueness checks
-   and a lookup table, and lose the cycle-free-by-construction property.
-4. **One root.** Is one result per plan enough for now? The alternative is a list of
-   named roots, so one plan can return several arrays that share work.
-5. **One `Open` per binding.** Is this rule too strict for any known host lowering?
-6. **Dead nodes on the wire.** Allow them, or require compacted plans at every export?
-7. **Warp geometry.** Keep `GeometryBinding` as an operation field, or turn the target
-   geometry into an `Open` input so it can also be computed? As a field, a binding
-   could be declared both by an `Open` and by a `GeometryBinding`, which rule 6 doesn't
-   yet cover. Making it an input removes that case.
-8. **ID scope.** Plan-wide `DimId`, with `VarId` and `GridId` scoped to one node's
-   schema, and renaming at lowering for distinct axes that share a name? The
+   for every traversal.
+3. **Node IDs.** Recommended: a dense `u32` graph index. The alternative is host-chosen
+   string IDs, which need uniqueness checks and a lookup table, and lose the
+   cycle-free-by-construction property.
+4. **One root.** Recommended: one root per plan, with several results as several roots
+   in one graph. The alternative is a list of named roots in the plan itself.
+5. **Duplicate bindings (c).** Recommended: check rule 6 over live nodes only, so a
+   rewrite can append a replacement `Open`. The stricter alternative counts dead nodes
+   too, and bars rewrites from appending an `Open` for a binding already opened.
+6. **Dead nodes on the wire.** Recommended: allow them, keeping compaction optional and
+   out of #28. The alternative compacts at every export, which moves compaction into
+   #28.
+7. **Warp geometry (b).** Recommended: turn the target geometry into an `Open` input
+   to `Warp`. It removes the case where one binding is declared by both an `Open` and a
+   `GeometryBinding`, which rule 6 doesn't cover, lets geometry be computed, and leaves
+   `Open` as the only way external data enters. The alternative keeps the field and
+   extends rule 6 to it.
+8. **ID scope.** Recommended: plan-wide `DimId`, with `VarId` and `GridId` scoped to
+   one node's schema, and renaming at lowering for distinct axes that share a name. The
    alternative is per-`Open` scope for everything, with an explicit mapping operation
    wherever two datasets meet.
+9. **Dimensions across grids (a).** Recommended: a shared `DimId` asserts axis
+   identity even when its grids' definitions differ, and combining such inputs is
+   rejected until a `Warp` makes them agree. The alternative is that each grid owns its
+   dimensions, so dimensions on differently defined grids must have different names.
+10. **Integer encoding.** Recommended: `NodeId` as a JSON number and 64-bit values as
+    decimal strings. The alternative is decimal strings for all integers, which the #26
+    review suggested; this proposal follows whichever rule #26 settles.

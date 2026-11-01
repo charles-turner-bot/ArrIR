@@ -50,7 +50,9 @@ pub struct GeometryRules {
 }
 
 pub struct WarpTarget {
-    /// The output grid. Its ID, dimensions and coordinate names are new to the schema.
+    /// The output grid. Its ID and coordinate names are new to the output schema. A
+    /// dimension name already used elsewhere in the plan names the same axis
+    /// (`plans/dag.md`, "ID scope across Opens").
     pub grid: Grid,
     /// The size of each of the target grid's dimensions.
     pub sizes: Vec<(DimId, u64)>,

@@ -22,18 +22,23 @@ Details in [dag.md](dag.md). All pending review.
   input is an earlier node, so cycles can't be written and validation is one pass.
 - **Rewrites append and move the root.** Old IDs and roots stay valid, and nodes shared
   with other consumers are never changed underneath them.
-- **Unreachable nodes are logically deleted.** Compaction is explicit and returns an
-  ID mapping, because it's the only step that invalidates IDs.
+- **Unreachable nodes are logically deleted.** Compaction is explicit, returns an ID
+  mapping, and isn't needed for export, so it stays out of #28.
 - **Derived schemas are never stored.** Since nodes don't change, a cache indexed by
   node ID never goes stale.
 - **The Rust arena is the plan.** Hosts lower into it through a builder rather than
   each keeping a validated node table of their own.
-- **One `Open` per binding, and no implicit merging** of equal nodes.
+- **One live `Open` per binding, and no implicit merging** of equal nodes. Dead nodes
+  don't count, so a rewrite can replace an `Open`.
+- **A `Graph` owns the nodes; a plan is a graph plus one root.** Rewrites append in
+  place and return a new root, copying the path from the rewritten node up to the root.
+- **Arity depends on the operation value,** so a weighted `Reduce` or a `Select` with
+  a computed mask takes extra inputs. `Project` keeps its array and dataset forms.
 - **`DimId` is plan-wide; `VarId` and `GridId` are per schema.** Neither #15 nor #26
   set ID scope, and the review of #26 deferred it here. A shared dimension name asserts
   one axis, not matching labels or extents.
 
 ## Not settled
 
-The seven questions at the end of [dag.md](dag.md), and the rewrite termination
+The questions at the end of [dag.md](dag.md), and the rewrite termination
 measure for graphs, which goes to #37.
