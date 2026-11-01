@@ -93,7 +93,11 @@ These settings are always written, so no gdalwarp default decides a result:
 - **Types and nodata:** `-ot`, `-wt` and `-dstnodata`, from the `Cast` that follows the
   warp, by the table in [cast.md](cast.md#what-gdalwarp-can-emit). Without a `Cast`, the
   output and working types are the method's output type, and `-dstnodata` is
-  `empty_value`. A `Collision::Nudge` also sets `UNIFIED_SRC_NODATA=NO`, since gdalwarp
+  `empty_value`. For a float output, `-wt` is never narrower than the source's float
+  type, so `Warp(float64)` followed by `Cast(float32)` emits `-ot Float32 -wt Float64`.
+  With `-wt Float32`, bilinear and cubic turn a finite neighbour of an infinite value
+  into NaN (verified with GDAL 3.13.3, guarded by
+  [fixtures/gdal/float32_narrowing.py](../fixtures/gdal/float32_narrowing.py)). A `Collision::Nudge` also sets `UNIFIED_SRC_NODATA=NO`, since gdalwarp
   only nudges per band.
 
 ## What it rejects
