@@ -8,8 +8,6 @@ mod dtype;
 mod extent;
 mod ids;
 mod schema;
-#[cfg(test)]
-mod schema_tests;
 
 pub use dtype::{DType, TypeKnowledge};
 pub use extent::Extent;

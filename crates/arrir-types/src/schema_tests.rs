@@ -248,6 +248,87 @@ fn sizes_list_each_spanned_dimension_once_in_first_appearance_order() {
         schema,
         SchemaError::SizesOutOfOrder {
             expected: vec![DimId::new("time"), DimId::new("lat")],
+            found: vec![DimId::new("lat"), DimId::new("time")],
         },
     );
+}
+
+#[test]
+fn a_variable_may_not_span_a_dimension_twice() {
+    let mut schema = observations();
+    schema.variables[0].dims = named(&["time", "time"]);
+    schema.sizes.pop();
+    rejects(
+        schema,
+        SchemaError::RepeatedDimension {
+            variable: VarId::new("t"),
+            dim: DimId::new("time"),
+        },
+    );
+}
+
+#[test]
+fn array_coordinates_span_only_the_payload_dimensions() {
+    // A named payload: the coordinate spans `lat`, which the payload `t(time)` doesn't.
+    let schema = Schema {
+        result: ResultKind::Array(ArrayResult {
+            variable: VarId::new("t"),
+        }),
+        variables: vec![
+            variable("t", named(&["time"]), VariableRole::Data),
+            variable(
+                "c",
+                named(&["lat"]),
+                VariableRole::Coordinate(CoordinateRole::Auxiliary),
+            ),
+        ],
+        sizes: vec![size("time", 365), size("lat", 3)],
+    };
+    rejects(
+        schema,
+        SchemaError::CoordinateOutsidePayload {
+            variable: VarId::new("c"),
+            dim: DimId::new("lat"),
+        },
+    );
+
+    // A positional payload may carry zero-dimensional coordinates only.
+    let positional = vec![VariableAxis::Positional(Extent::Known(3))];
+    let schema = Schema {
+        result: ResultKind::Array(ArrayResult {
+            variable: VarId::new("x"),
+        }),
+        variables: vec![
+            variable("x", positional.clone(), VariableRole::Data),
+            variable(
+                "c",
+                named(&["lat"]),
+                VariableRole::Coordinate(CoordinateRole::Auxiliary),
+            ),
+        ],
+        sizes: vec![size("lat", 3)],
+    };
+    rejects(
+        schema,
+        SchemaError::CoordinateOutsidePayload {
+            variable: VarId::new("c"),
+            dim: DimId::new("lat"),
+        },
+    );
+
+    let schema = Schema {
+        result: ResultKind::Array(ArrayResult {
+            variable: VarId::new("x"),
+        }),
+        variables: vec![
+            variable("x", positional, VariableRole::Data),
+            variable(
+                "c",
+                vec![],
+                VariableRole::Coordinate(CoordinateRole::Auxiliary),
+            ),
+        ],
+        sizes: vec![],
+    };
+    assert_eq!(schema.validate(), Ok(()));
 }

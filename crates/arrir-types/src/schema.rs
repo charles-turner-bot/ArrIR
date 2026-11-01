@@ -74,13 +74,19 @@ pub struct IndexCoordinate {
     pub dim: DimId,
 }
 
-/// A structural contradiction in a schema. Each error names the variable or dimension.
+/// A structural contradiction in a schema.
+///
+/// Each error names the variable or dimension involved. The variant itself names the
+/// failing field (axes, role, payload or `sizes`), which is how this crate reads the
+/// contract's "errors carry the ID and failing field".
 #[derive(Clone, Debug, PartialEq, Eq, Error)]
 pub enum SchemaError {
     #[error("variable {variable:?} appears more than once")]
     DuplicateVariable { variable: VarId },
     #[error("variable {variable:?} mixes named and positional axes")]
     MixedAxisNames { variable: VarId },
+    #[error("variable {variable:?} spans dimension {dim:?} more than once")]
+    RepeatedDimension { variable: VarId, dim: DimId },
     #[error("array payload {variable:?} is not a variable of the schema")]
     UnknownPayload { variable: VarId },
     #[error("variable {variable:?} is data but is not the array's payload")]
@@ -89,6 +95,8 @@ pub enum SchemaError {
     PositionalAxisInDataset { variable: VarId },
     #[error("coordinate {variable:?} has positional axes")]
     PositionalCoordinate { variable: VarId },
+    #[error("coordinate {variable:?} spans dimension {dim:?}, which the array's payload doesn't")]
+    CoordinateOutsidePayload { variable: VarId, dim: DimId },
     #[error("index coordinate {variable:?} must span exactly its dimension {dim:?}")]
     IndexCoordinateAxes { variable: VarId, dim: DimId },
     #[error("dimension {dim:?} has more than one index coordinate")]
@@ -99,8 +107,11 @@ pub enum SchemaError {
     MissingSize { dim: DimId },
     #[error("dimension {dim:?} has an entry in sizes but no variable spans it")]
     UnusedSize { dim: DimId },
-    #[error("sizes are not in first-appearance order; expected {expected:?}")]
-    SizesOutOfOrder { expected: Vec<DimId> },
+    #[error("sizes are not in first-appearance order; expected {expected:?}, found {found:?}")]
+    SizesOutOfOrder {
+        expected: Vec<DimId>,
+        found: Vec<DimId>,
+    },
 }
 
 impl Schema {
@@ -127,15 +138,15 @@ impl Schema {
             }
             self.check_variable(variable, &mut indexed_dims)?;
         }
+        self.check_coordinates_within_payload()?;
         self.check_sizes()
     }
 
-    fn check_variable<'a>(
+    fn check_variable(
         &self,
-        variable: &'a Variable,
-        indexed_dims: &mut BTreeSet<&'a DimId>,
+        variable: &Variable,
+        indexed_dims: &mut BTreeSet<DimId>,
     ) -> Result<(), SchemaError> {
-        let id = || variable.id.clone();
         let named = variable
             .dims
             .iter()
@@ -143,13 +154,29 @@ impl Schema {
             .count();
         let positional = variable.dims.len() - named;
         if named > 0 && positional > 0 {
-            return Err(SchemaError::MixedAxisNames { variable: id() });
+            return Err(SchemaError::MixedAxisNames {
+                variable: variable.id.clone(),
+            });
+        }
+        let mut seen_dims: Vec<&DimId> = Vec::new();
+        for axis in &variable.dims {
+            if let VariableAxis::Named(dim) = axis {
+                if seen_dims.contains(&dim) {
+                    return Err(SchemaError::RepeatedDimension {
+                        variable: variable.id.clone(),
+                        dim: dim.clone(),
+                    });
+                }
+                seen_dims.push(dim);
+            }
         }
 
         match &self.result {
             ResultKind::Array(array) => {
                 if variable.role == VariableRole::Data && variable.id != array.variable {
-                    return Err(SchemaError::ExtraDataInArray { variable: id() });
+                    return Err(SchemaError::ExtraDataInArray {
+                        variable: variable.id.clone(),
+                    });
                 }
             }
             ResultKind::Dataset => {
@@ -157,26 +184,58 @@ impl Schema {
                 // a dataset holding just that data variable.
                 let single_array = self.variables.len() == 1 && variable.role == VariableRole::Data;
                 if positional > 0 && !single_array {
-                    return Err(SchemaError::PositionalAxisInDataset { variable: id() });
+                    return Err(SchemaError::PositionalAxisInDataset {
+                        variable: variable.id.clone(),
+                    });
                 }
             }
         }
 
         if let VariableRole::Coordinate(role) = &variable.role {
             if positional > 0 {
-                return Err(SchemaError::PositionalCoordinate { variable: id() });
+                return Err(SchemaError::PositionalCoordinate {
+                    variable: variable.id.clone(),
+                });
             }
             if let CoordinateRole::Index(index) = role {
                 if variable.dims != [VariableAxis::Named(index.dim.clone())] {
                     return Err(SchemaError::IndexCoordinateAxes {
-                        variable: id(),
+                        variable: variable.id.clone(),
                         dim: index.dim.clone(),
                     });
                 }
-                if !indexed_dims.insert(&index.dim) {
+                if !indexed_dims.insert(index.dim.clone()) {
                     return Err(SchemaError::DuplicateIndex {
                         dim: index.dim.clone(),
                     });
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// In an `Array` result, every coordinate spans only dimensions the payload spans,
+    /// as xarray requires of a `DataArray`. A positional payload has no named
+    /// dimensions, so its coordinates must be zero-dimensional.
+    fn check_coordinates_within_payload(&self) -> Result<(), SchemaError> {
+        let ResultKind::Array(array) = &self.result else {
+            return Ok(());
+        };
+        let Some(payload) = self.variables.iter().find(|v| v.id == array.variable) else {
+            return Ok(()); // already reported as UnknownPayload
+        };
+        for variable in &self.variables {
+            if variable.id == payload.id {
+                continue;
+            }
+            for axis in &variable.dims {
+                if let VariableAxis::Named(dim) = axis {
+                    if !payload.dims.contains(axis) {
+                        return Err(SchemaError::CoordinateOutsidePayload {
+                            variable: variable.id.clone(),
+                            dim: dim.clone(),
+                        });
+                    }
                 }
             }
         }
@@ -213,8 +272,15 @@ impl Schema {
             }
         }
         if listed != expected {
-            return Err(SchemaError::SizesOutOfOrder { expected });
+            return Err(SchemaError::SizesOutOfOrder {
+                expected,
+                found: listed,
+            });
         }
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "schema_tests.rs"]
+mod tests;

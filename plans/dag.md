@@ -447,6 +447,10 @@ for a self-loop, `[7]` gives `DanglingInput { node: 1, input: 7 }`, and `[]` giv
 }
 ```
 
+`Schema` has no `grids` field until grids.md's types are implemented, so this example's
+`"grids": []` is accepted from then. Until that PR, the first schema slice (#62) reads
+the example without it.
+
 Wire rules:
 
 - A wire plan is a graph and one root. Nodes are serialised in id order, so
