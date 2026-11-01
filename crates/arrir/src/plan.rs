@@ -191,6 +191,21 @@ impl Graph {
         live
     }
 
+    /// Like `live_nodes`, but stops at `stop`: `stop` is marked, and its inputs are
+    /// marked only if the root reaches them by another path.
+    fn nodes_reached_without(&self, root: NodeId, stop: NodeId) -> Vec<bool> {
+        let mut reached = vec![false; self.nodes.len()];
+        reached[root.index()] = true;
+        for index in (0..=root.index()).rev() {
+            if reached[index] && index != stop.index() {
+                for input in &self.nodes[index].inputs {
+                    reached[input.index()] = true;
+                }
+            }
+        }
+        reached
+    }
+
     /// Replaces `target` with `replacement` in the plan rooted at `root`, and returns
     /// the new root (`plans/dag.md`, "Rewrites keep old IDs and roots"). The caller appends the replacement
     /// nodes first. Every live node that depends on `target`, directly or through
@@ -198,9 +213,12 @@ impl Graph {
     /// other node is reused. No existing node changes, so `root` still names the
     /// unrewritten plan.
     ///
-    /// Every live use of `target` on the copied path is substituted, including uses
-    /// inside `replacement`'s own dependants: replacing 1 with 2 in `B(1, U(1))`
-    /// gives `B(2, U(2))`. Replacing a node with itself returns `root` unchanged.
+    /// `replacement` is exempt, as in MLIR's `replaceAllUsesExcept`: it is never
+    /// copied, and neither is a node that the root reaches only through it. So
+    /// replacing `X` with an already-live `U(X)` in `B(X, U(X))` gives `B(U(X), U(X))`.
+    /// A node the root also reaches by another path is copied for that path. In
+    /// `B(U(X), C(X))` with replacement `U(X)`, `C` is copied to `C(U(X))` and `U(X)`
+    /// stays as it is. Replacing a node with itself returns `root` unchanged.
     ///
     /// Fails if `root`, `target` or `replacement` isn't in the graph. Replacing an
     /// unreachable target is an error.
@@ -228,13 +246,17 @@ impl Graph {
         if replacement == target {
             return Ok(root);
         }
+        // Which nodes the root reaches without passing through `replacement`. Only
+        // these are copied, so `replacement` and anything reached only through it keep
+        // their inputs. This covers the graph as it was, so the copies appended below
+        // are skipped.
+        let reached = self.nodes_reached_without(root, replacement);
         // Maps each replaced or copied node to the node that now stands for it.
         let mut replaced: BTreeMap<NodeId, NodeId> = BTreeMap::new();
         replaced.insert(target, replacement);
-        // Only nodes after `target` can depend on it, and only live ones are copied.
-        // `live` covers the graph as it was, so the copies appended below are skipped.
-        for (index, &is_live) in live.iter().enumerate() {
-            if index <= target.index() || !is_live {
+        // Only nodes after `target` can depend on it.
+        for (index, &is_reached) in reached.iter().enumerate() {
+            if index <= target.index() || !is_reached || index == replacement.index() {
                 continue;
             }
             let node = &self.nodes[index];

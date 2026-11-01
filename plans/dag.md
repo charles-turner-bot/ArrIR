@@ -176,8 +176,11 @@ re-appending every node on the path from it up to the root, each pointing at its
 replaced input. Nodes off that path are reused as they are. In `arrir` this is
 `Graph::replace(root, target, replacement)`: the caller appends the replacement first,
 and every live node that reads `target`, directly or indirectly, is copied with each
-use of `target` substituted. That includes a live replacement's own dependants:
-replacing `X` with an already-live `U(X)` in `B(X, U(X))` gives `B(U(X), U(U(X)))`.
+use of `target` substituted. The replacement is exempt, as in MLIR's
+`replaceAllUsesExcept` (decided by Charles, 2 November 2026): it is never copied, and
+neither is a node the root reaches only through it. Replacing `X` with an already-live
+`U(X)` in `B(X, U(X))` gives `B(U(X), U(X))`. A node also reached by another path is
+copied for that path: in `B(U(X), C(X))`, `C` becomes `C(U(X))`.
 The result isn't re-validated; callers validate the new root. See
 [Rewriting below the root](#rewriting-below-the-root).
 

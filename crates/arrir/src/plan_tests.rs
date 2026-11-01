@@ -437,9 +437,10 @@ fn replacing_a_node_with_itself_changes_nothing() {
     assert_eq!(graph.len(), 3);
 }
 
-/// Replacing 1 with 2 in `B(1, U(1))`, where 2 is `U(1)` itself: both uses change.
+/// Replacing 1 with 2 in `B(1, U(1))`, where 2 is `U(1)` itself: the replacement is
+/// exempt (MLIR's `replaceAllUsesExcept`), so the result is `B(U(1), U(1))`.
 #[test]
-fn every_live_use_of_the_target_is_substituted() {
+fn a_live_replacement_is_not_rewritten() {
     let mut graph = graph(vec![
         open("obs"),
         unary("project", 0),
@@ -447,6 +448,49 @@ fn every_live_use_of_the_target_is_substituted() {
         binary("b", 1, 2),
     ]);
     let new_root = graph.replace(NodeId(3), NodeId(1), NodeId(2)).unwrap();
-    assert_eq!(graph.node(new_root), &binary("b", 2, 4));
-    assert_eq!(graph.node(NodeId(4)), &unary("u", 2));
+    assert_eq!(graph.node(new_root), &binary("b", 2, 2));
+    assert_eq!(graph.node(NodeId(2)), &unary("u", 1));
+    assert_eq!(graph.len(), 5, "only the root is copied");
+}
+
+/// `a + (a + 1)` with `a` replaced by the existing `a + 1` gives `(a + 1) + (a + 1)`,
+/// not `(a + 1) + ((a + 1) + 1)`.
+#[test]
+fn replacing_with_an_existing_plus_one_keeps_it_as_is() {
+    let mut graph = graph(vec![open("a"), unary("plus one", 0), binary("add", 0, 1)]);
+    let new_root = graph.replace(NodeId(2), NodeId(0), NodeId(1)).unwrap();
+    assert_eq!(graph.node(new_root), &binary("add", 1, 1));
+}
+
+/// In `B(U(1), C(1))` with replacement `U(1)`, `C` is still copied to read `U(1)`,
+/// because the root reaches it by a path that doesn't go through the replacement.
+#[test]
+fn a_node_reached_by_another_path_is_still_copied() {
+    let mut graph = graph(vec![
+        open("obs"),
+        unary("project", 0),
+        unary("u", 1),
+        unary("c", 1),
+        binary("b", 2, 3),
+    ]);
+    let new_root = graph.replace(NodeId(4), NodeId(1), NodeId(2)).unwrap();
+    assert_eq!(graph.node(NodeId(5)), &unary("c", 2));
+    assert_eq!(graph.node(new_root), &binary("b", 2, 5));
+    assert_eq!(graph.node(NodeId(2)), &unary("u", 1));
+}
+
+/// A fresh replacement, appended but not yet live, behaves as before: every use of
+/// the target on the path is redirected to it.
+#[test]
+fn a_fresh_replacement_takes_every_use() {
+    let mut graph = graph(vec![
+        open("obs"),
+        unary("project", 0),
+        unary("u", 1),
+        binary("b", 1, 2),
+    ]);
+    let fresh = graph.append(unary("select", 1)).unwrap();
+    let new_root = graph.replace(NodeId(3), NodeId(1), fresh).unwrap();
+    assert_eq!(graph.node(NodeId(5)), &unary("u", 4));
+    assert_eq!(graph.node(new_root), &binary("b", 4, 5));
 }
