@@ -1,7 +1,10 @@
 # Logical schemas and values
 
-Status: proposal, 30 October 2026. Completes roadmap step 3 in [design.md](design.md).
-This defines extension points, not an instruction to implement every future variant.
+Status: proposal, 30 October 2026, revised 1 November after review. Details roadmap
+step 3 in [design.md](design.md). This defines extension points, not an instruction to
+implement every future variant. It builds on the decided [dag.md](dag.md),
+[shapes.md](shapes.md) and [dtypes.md](dtypes.md), and links to them rather than
+restating their rules.
 
 ## Design rule
 
@@ -30,45 +33,73 @@ pub enum ResultKind { Dataset, Array(ArrayResult) }
 pub struct ArrayResult { pub variable: VarId }
 pub struct Variable {
     pub id: VarId,
-    pub dims: Vec<DimId>,
+    pub dims: Vec<VariableAxis>,
     pub role: VariableRole,
     pub dtype: TypeKnowledge,
     pub missing: MissingValues,
     pub spatial: SpatialState,
 }
+/// Named axes take their extent from `sizes`; a positional axis has no `DimId` to key
+/// it there, so its extent sits on the variable.
+pub enum VariableAxis { Named(DimId), Positional(Extent) }
 pub enum VariableRole { Data, Coordinate(CoordinateRole) }
 pub enum CoordinateRole { Index(IndexCoordinate), Auxiliary }
 pub struct IndexCoordinate { pub dim: DimId }
-pub enum Extent { Known(u64), Unknown }
 pub enum TypeKnowledge { Known(DType), Unknown }
 pub enum SpatialState { Ungridded, Placed(GridPlacement), Unresolved }
 ```
+
+`Extent` is defined in [shapes.md](shapes.md#three-kinds-of-extent): `Known`, `Unknown`
+and `Symbolic`. A declared (`Open`) schema may use `Known` and `Unknown` only, and
+validation rejects `Symbolic` there (`SymbolInDeclaredSchema`). Derived schemas hold
+`Known` and `Symbolic`.
 
 - `Array` names one payload variable, which may itself have a coordinate role; every
   other variable is a coordinate. `Dataset` may have several data variables, or none.
   Projection changes `result`, not
   just membership. A zero-dimensional array is an array with `dims: []`, not a new
   scalar-result kind. A future table/tree result needs its own variant and semantics.
-- Variable order and each variable's dimension order are explicit and deterministic.
-  No operation sorts dimension names to make an implementation convenient.
+  A literal's schema is the one [dtypes.md](dtypes.md#python-scalars-and-constants)
+  gives `Constant`: one zero-dimensional data variable with the fixed `VarId`
+  `constant`.
+- Variable order and each variable's axis order are explicit and deterministic.
+  No operation sorts dimension names to make an implementation convenient, beyond the
+  output-order rule an operation documents ([shapes.md](shapes.md#broadcasting)).
+- A variable's axes are all `Named` or all `Positional` (shapes.md's `MixedAxisNames`).
+  Its shape, as shapes.md defines it, is derived: a named axis's extent is looked up in
+  `sizes`, and a positional axis carries its own.
 - Dimension membership is derived from variables, as in xrexpr's `SchemaState`.
-  `sizes` gives one extent for every spanned dimension and none for unspanned dimensions.
-  It cannot create a dimension by itself. Grids cannot refer to missing dimensions.
+  `sizes` gives one extent for every named dimension some variable spans, and none for
+  any other. It cannot create a dimension by itself. Grids cannot refer to missing
+  dimensions.
+- **`sizes` is in canonical order:** dimensions in order of first appearance, walking
+  `variables` in order and each variable's `dims` in order. Validation rejects any other
+  order, so two hosts produce the same bytes for the same schema (purity rule 7).
 - Coordinate membership is a role, not a dtype. An index coordinate spans exactly
-  its named dimension; an auxiliary coordinate may span several dimensions or none.
+  its named dimension, which must be a `Named` axis; an auxiliary coordinate may span
+  several dimensions or none.
   `Index` declares an association, not sortedness, uniqueness, regularity or a loaded
   lookup table. Label resolution remains separate.
-- `Known(0)` is empty, not unknown. Known extents shared by variables agree. Rank is
-  known in the first subset; unknown rank/ragged axes require a later explicit contract,
-  not a guessed empty dimension list.
-- IDs, grid IDs and index-coordinate associations are unique within their scope.
-  Coordinates and placements must refer to entities present in the schema.
+- `Known(0)` is empty, not unknown. Rank is known in the first subset; unknown
+  rank/ragged axes require a later explicit contract, not a guessed empty dimension
+  list.
+- **ID scope is [dag.md's](dag.md#id-scope-across-opens):** `DimId` is plan-wide for
+  named axes, while `VarId` and `GridId` are unique within one node's schema.
+  Index-coordinate associations are unique within the schema. Coordinates and
+  placements must refer to entities present in the schema.
+
+#16's `ArraySchema` put an extent on each dimension of one array. This dataset-level
+schema replaces it as the starting point for roadmap step 3. The legacy `effects.rs`
+that #15 moves into `arrir::legacy` keeps its own `ArraySchema` unchanged; legacy code
+isn't extended (design.md).
 
 ## Spatial state is not an optional placement
 
 Reuse `GridKind`, `GridModel`, `Location` and `AxisPosition` from [grids.md](grids.md).
 A schema can hold ordinary arrays and several differently gridded variables together.
-`Placed` must match its grid's kind, dimensions and staggered extents.
+`Placed` must match its grid's kind, dimensions and staggered extents. Only a variable
+with `Named` axes can be `Placed`, because placements refer to axes by `DimId`
+([shapes.md](shapes.md#shapes-are-ordered-axes-with-extents)).
 
 `Ungridded` positively says that grid arithmetic does not apply. `Unresolved` says it
 cannot yet be justified, for example after a label selection whose positions are not
@@ -122,7 +153,7 @@ Future variants need their own contracts before acceptance:
 
 | Family | Information its variant must carry |
 | --- | --- |
-| Complex | component float width and component-wise scalar encoding |
+| Complex | component float width and component-wise scalar encoding. Required by Array API 2025.12, but deferred ([dtypes.md](dtypes.md#complex-and-other-families), [coverage](array-api-coverage.md)) |
 | Text | logical string semantics, distinct from fixed-width storage bytes |
 | Timestamp | unit, calendar and time-zone interpretation; no implicit Gregorian conversion |
 | Duration | unit and arithmetic rules, distinct from a calendar timestamp |
@@ -139,7 +170,10 @@ Use `MissingValues::Known { values, nan_is_missing } | Unknown` from
 [warp.md](warp.md#missing-values). `Known { values: [], nan_is_missing: false }`
 means no values are missing. It is not interchangeable with `Unknown`.
 Sentinels must be representable in the variable's logical dtype; their numeric
-comparison rules are explicit. Null bitmaps are a different missingness mechanism:
+comparison rules are explicit. **`values` may not contain a NaN:** NaN is missing only
+through `nan_is_missing`, so validation rejects a NaN sentinel rather than leave it
+meaningless. This matches how [cast.md](cast.md) and [warp.md](warp.md#missing-values)
+derive `nan_is_missing`. Null bitmaps are a different missingness mechanism:
 they need a new variant and propagation rules, not an invented sentinel.
 
 **Schema always describes the values operations receive.** For an already-decoded
@@ -190,9 +224,16 @@ Statistics and regularity guesses cannot promote unknown facts into semantic gua
 ## Wire contract and first proof
 
 Use tagged enum variants and an explicit schema version inside the eventual plan wire
-format. Encode 64-bit integers/extents as canonical decimal strings and float bit
-patterns as fixed-width hexadecimal strings; JavaScript must not round them through
-`Number`. Exact tags and examples land with the first serde fixtures, before adapters.
+format. Two integer rules, consistent with [dag.md](dag.md#wire-form):
+
+- **Values are strings.** Every integer `Scalar`, whatever its width, and every `Known`
+  extent is a canonical decimal string, so one rule covers all values and JavaScript
+  never rounds them through `Number`. Float bit patterns are fixed-width hexadecimal
+  strings.
+- **Structural indices are numbers.** `NodeId` and other `u32` indices, such as an axis
+  position, are JSON numbers, which every host reads exactly.
+
+Exact tags and examples land with the first serde fixtures, before adapters.
 An unknown semantic tag/version fails import. Adding a variant requires a supported
 version/capability check, not an assurance that every old reader will handle it.
 
@@ -202,3 +243,15 @@ dataset, auxiliary coordinates, mixed grids, unknown extents/types, signed zero,
 integers above 2^53 and invalid references. The next proof is Open → Select → one
 bounded Reduce, round-tripped and executed through xrexpr before and after one rewrite.
 Future dtype families, packed decoding and physical planning do not block that slice.
+
+## Questions for review
+
+1. **Where named extents live.** Proposed: one dataset-level `sizes`, in canonical
+   first-appearance order, is the only place a named dimension's extent is stated.
+   The alternative is shapes.md's `Axis { name, extent }` stored on every variable, with
+   validation that shared named axes agree. That matches shapes.md's struct directly,
+   but states each extent once per variable and adds a class of disagreement errors.
+   Recommended: dataset-level `sizes`, with each variable's shape derived.
+2. **Integers on the wire.** Proposed: every integer scalar and extent is a decimal
+   string, while `NodeId` and other `u32` indices stay JSON numbers (dag.md's
+   decision). The rule splits on "value or index", not on width. Recommended as written.

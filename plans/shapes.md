@@ -1,7 +1,7 @@
 # Symbolic shapes and broadcasting
 
 Status: decided 1 November 2026, for issue #29 (proposed 31 October). It builds on the
-schema proposal ([#26](https://github.com/charles-turner-bot/ArrIR/pull/26)) and the
+schema proposal ([schema-and-values.md](schema-and-values.md), #26) and the
 DAG contract ([dag.md](dag.md)). Nothing here is implemented yet; #2 implements it.
 
 ## What this decides

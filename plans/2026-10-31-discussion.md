@@ -117,5 +117,5 @@ decided some directly and accepted the recommendation on the rest:
 - The rewrite termination measure for graphs, which goes to #37.
 - A #42 fixture that encodes the GDAL narrowing cases, so a GDAL upgrade that changes
   them is caught.
-- The schema in #26: it needs `Extent::Symbolic`, and axes that are named or positional,
-  before dtypes.md's link to `schema-and-values.md` resolves.
+- The schema in #26 now takes `Extent` from shapes.md, axes that are named or
+  positional, and dag.md's ID scope. It is still a proposal; see its own review.

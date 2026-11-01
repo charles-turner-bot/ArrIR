@@ -21,9 +21,9 @@ else.
 - **#15** (workspace): `BindingId`, `VarId` and `DimId` from `arrir-types`. The new
   `NodeId` lives in `arrir`, not `arrir-types`, because schemas never refer to nodes.
 - **#26** (schema and values): each node's output is a `Schema` with a `ResultKind`.
-  This proposal uses #26's `Schema`, `ResultKind`, `ArrayResult`, `Extent` and
-  `TypeKnowledge` as written there and adds no schema types. If #26 changes, the
-  examples change with it.
+  This proposal uses #26's `Schema`, `ResultKind`, `ArrayResult` and `TypeKnowledge`
+  ([schema-and-values.md](schema-and-values.md)), and shapes.md's `Extent`, and adds no
+  schema types. The wire example below follows #26's revised form.
 - **#16** (shells): its purity rules and conventions are already in the contract. Its
   per-operation effects become per-node effects here, with one footprint per input.
   Nothing in this proposal depends on #16's code.
@@ -430,9 +430,10 @@ for a self-loop, `[7]` gives `DanglingInput { node: 1, input: 7 }`, and `[]` giv
       "op": { "Open": { "binding": "obs", "schema": {
         "result": "Dataset",
         "variables": [
-          { "id": "t", "dims": ["time", "lat"], "role": "Data", "dtype": { "Known": "Float32" } }
+          { "id": "t", "dims": [{ "Named": "time" }, { "Named": "lat" }],
+            "role": "Data", "dtype": { "Known": "Float32" } }
         ],
-        "sizes": [["time", "365"], ["lat", "180"]],
+        "sizes": [["time", { "Known": "365" }], ["lat", { "Known": "180" }]],
         "grids": []
       } } },
       "inputs": []
@@ -451,8 +452,8 @@ Wire rules:
 - `id` is written out for readability and must equal the node's position. It exists
   only on the wire.
 - `NodeId` is a `u32`, written as a JSON number, which every host reads exactly.
-  Extents and other 64-bit values stay decimal strings, as #26 says. Question 10 asks
-  whether to use one rule for all integers instead.
+  Extents and integer scalars are decimal strings
+  ([schema-and-values.md](schema-and-values.md#wire-contract-and-first-proof)).
 - Dead nodes may appear on the wire. Adapters and hosts ignore them. Export doesn't
   require compaction.
 - An unknown `version` or operation tag fails import.
@@ -503,6 +504,6 @@ Each question was proposed with a recommendation. Charles accepted all of them o
    grid's dimension names. The alternatives are a `Rename` before the `Warp`, so the
    target needs no reused names, or that each grid owns its dimensions, so dimensions
    on differently defined grids must always have different names.
-10. **Integer encoding.** Decided: `NodeId` as a JSON number and 64-bit values as
-    decimal strings. The alternative is decimal strings for all integers, which the #26
-    review suggested; this proposal follows whichever rule #26 settles.
+10. **Integer encoding.** Decided: `NodeId` as a JSON number. #26 settles the rest:
+    every integer scalar and extent is a decimal string, and `u32` structural indices
+    are numbers ([schema-and-values.md](schema-and-values.md#wire-contract-and-first-proof)).
