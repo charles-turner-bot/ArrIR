@@ -67,7 +67,7 @@ Each function appears once. Proposed representation is in the third column.
 | `zeros`, `ones`, `full`, `zeros_like`, `ones_like`, `full_like` | New | A constant with a declared shape. PR #47's `Constant` is zero-dimensional and broadcasts inside elementwise operations, so a shaped fill is needed only when materialised on its own. |
 | `empty`, `empty_like` | Deferred | Uninitialised values have no defined meaning. |
 | `arange`, `linspace` | New | A generated index sequence. Low priority: regular grids are declared ([grids.md](grids.md)). |
-| `meshgrid` | Compose after New | Positional `expand_dims` on each input, then `broadcast_arrays` (below). The default `indexing='xy'` also swaps the first two dimensions (Transpose, #4). |
+| `meshgrid` | Compose after New | Positional `expand_dims` on each input, then `broadcast_arrays`, which is also Blocked (below). The default `indexing='xy'` also swaps the first two dimensions (Transpose, #4). |
 | `eye`, `tril`, `triu` | Deferred | Compose from `arange`, comparison and `where` once those exist; no data-access use. |
 | **Data types** | | |
 | `astype` | Direct | `Cast`, [cast.md](cast.md), #38. Stricter than the spec: rounding and out-of-range policies are explicit where the spec leaves them implementation-defined. |
@@ -89,7 +89,7 @@ Each function appears once. Proposed representation is in the third column.
 | `matmul`, `tensordot` | Deferred | Semantically `expand_dims` + `multiply` + `sum`, but with an O(n·m·k) intermediate. A contraction primitive waits for a use case such as regridding weights; `Warp` covers regridding today. |
 | **Manipulation** | | |
 | `broadcast_shapes` | Meta | #29, PR #46. |
-| `broadcast_to`, `broadcast_arrays` | Meta | No node: elementwise inference already broadcasts (PR #46, question 7), so lowering drops the call when every consumer is elementwise.⁵ |
+| `broadcast_to`, `broadcast_arrays` | Blocked | Needs a broadcast node in general; whether ArrIR has one is #46's open question 7. Rejected at the plan root until then.⁵ |
 | `concat` | New | Variadic (`AtLeast(1)` in PR #45), extent sum along a dimension, promotion across inputs. No design. With symbolic extents it also needs a sum size term, which PR #46's `SizeTerm` doesn't define. |
 | `stack` | Compose after New | `expand_dims` on each input, then `concat`. Both are New; the broadcasting decision doesn't change that. |
 | `expand_dims` | New | Inserts a positional length-1 axis. Also `newaxis`. Positional only: named shapes broadcast absent dimensions themselves (PR #46), so they don't need it. |
@@ -105,7 +105,7 @@ Each function appears once. Proposed representation is in the third column.
 | `argmax`, `argmin`, `count_nonzero` | Direct | `Reduce` variants (roadmap step 5). Lowering states the index or counter dtype, as PR #47 does for `count_nonzero`. |
 | `nonzero` | Deferred | Its extent is Runtime (`CountNonZero`, PR #46) and its order row-major. Boolean indexing (#36) covers the use case. |
 | `searchsorted` | Deferred | Known output shape, but needs a sortedness precondition planning can't check. Label resolution, its main use, is outside the core. |
-| `where` | New | Ternary, `Exactly(3)`. See [Questions for review](#questions-for-review). |
+| `where` | Blocked | PR #46 and PR #47 treat it as a ternary member of #32's `Elementwise` family, and #32 asks whether to include it. See [Questions for review](#questions-for-review). |
 | **Sets** | | |
 | `unique_all`, `unique_counts`, `unique_inverse`, `unique_values` | Deferred | Extents are Runtime; no data-access use yet. |
 | `isin` | Deferred | Known shape, but no data-access use yet. |
@@ -140,9 +140,10 @@ Each function appears once. Proposed representation is in the third column.
    `reshape` and is Blocked.
 3. Repetitions longer than the rank add leading dimensions and need `expand_dims` (New).
 4. `prepend` and `append` need `concat` (New).
-5. A non-elementwise consumer of the broadcast value (for example `sum` over a
-   broadcast axis) needs it materialised. That case is Deferred until a use case
-   needs a shape-only broadcast.
+5. Meta, with no node, only when the consumer's output shape already covers the
+   target shape: `broadcast_to(x(3,), (2, 3)) + y(2, 3)` can drop the call, but
+   `broadcast_to(x(3,), (2, 3)) + y(3,)` would give `(3,)` instead of `(2, 3)`. A
+   broadcast at the root, or one consumed by a reduction, always needs the node.
 
 ## Counts
 
@@ -154,9 +155,9 @@ the constants, operators, array attributes and the two extensions.
 | Direct | 79 |
 | Compose | 9 |
 | Compose after New | 2 |
-| New | 12 |
-| Blocked | 5 |
-| Meta | 8 |
+| New | 11 |
+| Blocked | 8 |
+| Meta | 6 |
 | Runtime | 0 |
 | Deferred | 20 |
 | **Total** | **135** |
@@ -173,19 +174,17 @@ reduction, alignment and regridding, not by catalogue size.
 
 1. **`concat`** (alignment). Assumes datasets split across files along time reach
    ArrIR as several `Open`s. If the byterefs layout ([chunked-layout.md](chunked-layout.md))
-   presents them as one `Open`, this drops below `where`. Needs a sum size term in
-   PR #46 for symbolic extents.
-2. **`where`** (selection, alignment). Masking by land/sea or quality flags, and
-   assigning through a mask.
-3. **A `Reduce` specification issue** (reduction). Roadmap step 5 exists, and PR #47
+   presents them as one `Open`, this drops below the `Reduce` issue. Needs a sum size
+   term in PR #46 for symbolic extents.
+2. **A `Reduce` specification issue** (reduction). Roadmap step 5 exists, and PR #47
    covers accumulators, `result` and `order`. `argmax`/`argmin`, the `var`/`std`
    formula and `correction`, boolean `all`/`any` and `count_nonzero` have no ticket.
-4. **`expand_dims`** (positional only). Named shapes no longer need it (PR #46), so
+3. **`expand_dims`** (positional only). Named shapes no longer need it (PR #46), so
    it serves NumPy-style code: `x[:, None]`, `stack`, `meshgrid` and `tile`.
-5. **A traversal-order contract** (selection). `reshape`, `nonzero` and boolean indexing
+4. **A traversal-order contract** (selection). `reshape`, `nonzero` and boolean indexing
    all yield row-major order. #5 needs it before claiming equivalence, and #36 needs it
    for masks over more than one dimension.
-6. **`Scan`** (reduction). In the extraction table, with no issue. `include_initial`
+5. **`Scan`** (reduction). In the extraction table, with no issue. `include_initial`
    needs an offset size term in PR #46.
 
 Deferred until a use case arrives: shaped constants, contractions (`matmul`,
@@ -194,10 +193,10 @@ extensions, and complex dtypes.
 
 ## Questions for review
 
-1. **`broadcast_to`** (with PR #46's question 7). Recommendation: no node. Lowering drops
-   the call when every consumer is elementwise, since inference already broadcasts.
-   Reject a non-elementwise consumer until a use case justifies a shape-only broadcast.
-   Multiplying by a `ones` constant was considered and rejected: missingness depends on
+1. **`broadcast_to`** (with PR #46's question 7). Recommendation: lowering drops the
+   call only when the consumer's output shape already covers the target, and rejects
+   every other case, the plan root included, until #46 decides on a shape-only
+   broadcast node. Multiplying by a `ones` constant was considered and rejected: missingness depends on
    #39, a `ones` can't be typed when the dtype is Unknown, and a rewrite folding `x * 1`
    to `x` would drop the broadcast.
 2. **`where`** (#32). A ternary `Elementwise` variant or its own node? Recommendation: a
