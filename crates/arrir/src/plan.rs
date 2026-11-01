@@ -114,6 +114,15 @@ pub enum PlanError {
     },
 }
 
+/// Why a rewrite can't be made. Structural errors stay in [`PlanError`].
+#[derive(Clone, Debug, PartialEq, Eq, Error)]
+pub enum RewriteError {
+    #[error("node {0:?} isn't in the graph")]
+    NotInGraph(NodeId),
+    #[error("node {0:?} isn't reachable from the root, so replacing it changes nothing")]
+    TargetNotLive(NodeId),
+}
+
 /// The node arena. The field is private, so nodes can be added but never changed or
 /// removed (rule 1).
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -173,6 +182,67 @@ impl Graph {
             }
         }
         live
+    }
+
+    /// Replaces `target` with `replacement` in the plan rooted at `root`, and returns
+    /// the new root (`plans/dag.md`, "Rewrites"). The caller appends the replacement
+    /// nodes first. Every live node that depends on `target`, directly or through
+    /// other nodes, is appended again with its inputs updated (path copying); every
+    /// other node is reused. No existing node changes, so `root` still names the
+    /// unrewritten plan.
+    ///
+    /// Every live use of `target` on the copied path is substituted, including uses
+    /// inside `replacement`'s own dependants: replacing 1 with 2 in `B(1, U(1))`
+    /// gives `B(2, U(2))`. Replacing a node with itself returns `root` unchanged.
+    ///
+    /// Fails if `root`, `target` or `replacement` isn't in the graph, or if `target`
+    /// isn't live from `root`, so a rewrite that would change nothing is an error.
+    // Outside tests `Operation` has no values yet, so the compiler sees that the copy
+    // below can never be made and warns. The `allow` goes with the first real operation.
+    #[cfg_attr(not(test), allow(unreachable_code, unused_variables, unused_mut))]
+    pub fn replace(
+        &mut self,
+        root: NodeId,
+        target: NodeId,
+        replacement: NodeId,
+    ) -> Result<NodeId, RewriteError> {
+        for id in [root, target, replacement] {
+            if id.index() >= self.nodes.len() {
+                return Err(RewriteError::NotInGraph(id));
+            }
+        }
+        let live = self.live_nodes(root);
+        if !live[target.index()] {
+            return Err(RewriteError::TargetNotLive(target));
+        }
+        if replacement == target {
+            return Ok(root);
+        }
+        // Maps each replaced or copied node to the node that now stands for it.
+        let mut replaced: BTreeMap<NodeId, NodeId> = BTreeMap::new();
+        replaced.insert(target, replacement);
+        // Only nodes after `target` can depend on it, and only live ones are copied.
+        // `live` covers the graph as it was, so the copies appended below are skipped.
+        for (index, &is_live) in live.iter().enumerate() {
+            if index <= target.index() || !is_live {
+                continue;
+            }
+            let node = &self.nodes[index];
+            if !node.inputs.iter().any(|i| replaced.contains_key(i)) {
+                continue;
+            }
+            let mut copy = node.clone();
+            for input in copy.inputs.iter_mut() {
+                if let Some(&new_input) = replaced.get(input) {
+                    *input = new_input;
+                }
+            }
+            let new_id = self
+                .append(copy)
+                .expect("a copy's inputs are existing nodes, so it is valid");
+            replaced.insert(NodeId(index as u32), new_id);
+        }
+        Ok(*replaced.get(&root).unwrap_or(&root))
     }
 }
 
