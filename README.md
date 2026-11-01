@@ -10,9 +10,9 @@ host calls ── lowering ──> ArrIR plan ── optional rewrites ── ad
 ```
 
 > **Status: design phase.** The design is largely decided and lives in
-> [`plans/`](plans/README.md). The code in `src/` is still the original experimental
-> scaffold, a linear chain of `Reduce`, `Select` and `Rechunk`. It is being replaced and
-> carries no compatibility guarantee.
+> [`plans/`](plans/README.md). The code is a workspace of shared ID types plus the
+> original experimental scaffold, a linear chain of `Reduce`, `Select` and `Rechunk`, in
+> `arrir::legacy`. The scaffold is being replaced and carries no compatibility guarantee.
 
 ## What ArrIR is
 
@@ -67,7 +67,9 @@ the [small-PR roadmap](plans/design.md#small-pr-roadmap).
 <details>
 <summary><b>What the current code contains</b></summary>
 
-`src/lib.rs` is the scaffold the redesign replaces:
+The workspace has two crates.
+
+`crates/arrir/src/legacy/mod.rs` is the scaffold the redesign replaces:
 
 - `Plan`, a linear list of unary operations;
 - `Reduce` over named dimension sets, `Select` with scalar, slice, position and mask
@@ -75,8 +77,8 @@ the [small-PR roadmap](plans/design.md#small-pr-roadmap).
 - serde serialisation and basic validation;
 - `LowerToArrIr` and `EmitFromArrIr` traits for adapters.
 
-PR #15 turns the crate into a workspace (`arrir-types` for IDs, the scaffold moved to
-`arrir::legacy`) as roadmap step 2.
+`crates/arrir-types` holds the portable ID types the replacement builds on: `DimId`,
+`VarId`, `BindingId` and `GridId` (roadmap step 2).
 
 </details>
 

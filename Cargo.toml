@@ -1,16 +1,15 @@
-[package]
-name = "arrir"
+[workspace]
+members = ["crates/arrir-types", "crates/arrir"]
+resolver = "2"
+
+[workspace.package]
 version = "0.1.0"
 edition = "2021"
-description = "A portable intermediate representation for unary array operation plans"
 license = "MIT"
 repository = "https://github.com/charles-turner-bot/arrir"
-keywords = ["array", "intermediate-representation", "xarray", "query-plan"]
-categories = ["data-structures", "science"]
 
-[dependencies]
+[workspace.dependencies]
+arrir-types = { path = "crates/arrir-types" }
 serde = { version = "1", features = ["derive"] }
-thiserror = "2"
-
-[dev-dependencies]
 serde_json = "1"
+thiserror = "2"

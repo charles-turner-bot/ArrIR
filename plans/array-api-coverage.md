@@ -11,8 +11,8 @@ per function.
 
 ## Implemented versus proposed
 
-The replacement IR implements nothing yet. The legacy scaffold (`src/lib.rs`, to become
-`arrir::legacy` in #15) has `Select`, `Rechunk` and a `Reduce` with an open string name,
+The replacement IR implements only its ID types (`arrir-types`). The legacy scaffold
+(`arrir::legacy`) has `Select`, `Rechunk` and a `Reduce` with an open string name,
 which [design.md](design.md#what-to-extract) rejects ("name alone is insufficient").
 Every class below describes *proposed* representation.
 
