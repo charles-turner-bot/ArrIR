@@ -98,7 +98,8 @@ These settings are always written, so no gdalwarp default decides a result:
   zero-weight neighbours as `0 × inf` = NaN, which breaks
   [warp.md's weight rule](warp.md#resampling), and gdalwarp chooses that path by default
   for a `float32` source (verified with GDAL 3.13.3, guarded by
-  [fixtures/gdal/float32_narrowing.py](../fixtures/gdal/float32_narrowing.py)). A `Collision::Nudge` also sets `UNIFIED_SRC_NODATA=NO`, since gdalwarp
+  [fixtures/gdal/float32_narrowing.py](../fixtures/gdal/float32_narrowing.py)).
+  A `Collision::Nudge` also sets `UNIFIED_SRC_NODATA=NO`, since gdalwarp
   only nudges per band.
 
 ## What it rejects
