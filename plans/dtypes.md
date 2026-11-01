@@ -3,8 +3,8 @@
 Status: decided 1 November 2026, for issue #30 (proposed 31 October). Nothing here is
 implemented yet; #31 implements it.
 
-It uses the `DType`, `Scalar` and `TypeKnowledge` types proposed in PR #26
-(`plans/schema-and-values.md`) and the node graph in [dag.md](dag.md). It adds
+It uses the `DType`, `Scalar` and `TypeKnowledge` types in
+[schema-and-values.md](schema-and-values.md) and the node graph in [dag.md](dag.md). It adds
 no schema types.
 
 Reference: [Array API 2025.12](https://data-apis.org/array-api/2025.12/), its

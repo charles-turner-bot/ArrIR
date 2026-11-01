@@ -99,9 +99,10 @@ take one `Cast` each.
 
 ## Conversion matrix
 
-`DType` is #26's: `Bool`, signed and unsigned integers of 8–64 bits, `float32` and
-`float64`. "Exact" means every input value is represented unchanged, so no option
-applies.
+`DType` is the one in
+[schema-and-values.md](schema-and-values.md#dtypes-and-scalar-values): `Bool`, signed
+and unsigned integers of 8–64 bits, `float32` and `float64`. "Exact" means every input
+value is represented unchanged, so no option applies.
 
 | From → to | Rule | `rounding` | `out_of_range` |
 | --- | --- | --- | --- |
@@ -227,7 +228,7 @@ data type; `gdal_translate` behaves the same. GDAL has no `bool` type.
 | gdalwarp, integer working type (`-wt` set to the output type), interpolating kernel | `NearestTiesUp` (bilinear: -2.5 → -2, -0.5 → 0) | `Clamp` | `Nudge` (not yet checked) |
 | gdalwarp, integer working type, `-r near` | `NearestTiesAway` (-2.5 → -3) on the conversion into the working type | `Clamp` | `Nudge` (not yet checked) |
 | gdalwarp, float working type, integer output | `NearestTiesAway` (2.5 → 3, -2.5 → -3, 3.5 → 4) | `Clamp` (`1e6` → 32767, `inf` → 32767) | `Keep` (the nudge is undone by rounding; not yet checked) |
-| gdalwarp, float working type no narrower than the source, float output | none needed | `Infinity` | `Nudge` (not yet checked) |
+| gdalwarp, float working type (`Float64` unless `Nearest`), float output | none needed | `Infinity` (verified) | `Nudge` (not yet checked) |
 | ordinary conversion, integer output from float | `NearestTiesAway` | `Clamp` | `Keep` (not yet checked) |
 | ordinary conversion, integer output from integer | none needed | `Clamp` (40000 → 32767, -5 → 0 as `Byte`) | `Keep` (not yet checked) |
 | ordinary conversion, float output from integer | ties to even (16777217 → 16777216 as `Float32`) | none needed | `Keep` (not yet checked) |
@@ -238,19 +239,35 @@ conversion, `TowardZero` and `NearestTiesEven` to an integer type, and `Missing`
 
 Notes on the checks:
 
-- **Float narrowing.** gdalwarp and a warped VRT (`gdal.Warp`, also with
-  `format="VRT"`), with `-wt Float64` and `-r near` or `bilinear`, and with
-  `-wt Float32` and `-r near`, map `1e39` → `inf`, `-1e39` → `-inf`, `3.5e38` → `inf`,
-  ±inf → ±inf, NaN → NaN, `FLT_MAX` and `nextafter(FLT_MAX)` → `FLT_MAX`. That's IEEE
-  754 overflow, the same as NumPy, so the row is `Infinity`. With `-wt Float32` and an
-  interpolating resampler, a finite neighbour of a value that is infinite in the
-  working type becomes NaN, so the adapter never sets `-wt` narrower than the source's
-  float type (#50, [gdal-adapter.md](gdal-adapter.md#how-it-emits-a-warp)).
-  gdal_translate and a plain VRT map `1e39` → `FLT_MAX` and also
-  `inf` → `FLT_MAX`. That clamps genuine infinities, which neither `Infinity` nor
-  `Clamp` describes, so a standalone `Cast` that narrows to `float32` is rejected
-  (decided 1 November, [dtypes.md](dtypes.md#decisions) question 9). A "clamp including
-  infinities" variant could be added if a real case needs it.
+- **gdalwarp and a warped VRT** (`gdal.Warp`, also with `format="VRT"`), with
+  `-wt Float64` and `-r near` or `bilinear`, and with `-wt Float32` and `-r near`:
+  `1e39` → `inf`, `-1e39` → `-inf`, `3.5e38` → `inf`, `inf` → `inf`, `-inf` → `-inf`,
+  NaN → NaN, `FLT_MAX` and `nextafter(FLT_MAX)` → `FLT_MAX`, `1.5` → `1.5`. This is
+  IEEE 754 overflow, the same as NumPy's `astype`, so the row is `Infinity`.
+- **gdalwarp with `-wt Float32` and an interpolating resampler** (`bilinear`, `cubic`):
+  the narrowing itself is still `Infinity`, but a finite neighbour of a value that is
+  infinite in the working type becomes NaN. In `[1, 2, 1e39, 4, 5, inf, 7, 8]`, the `2`
+  and the `5` come out as NaN. With `-wt Float64` the neighbours are unchanged. The
+  same happens to a `float32` source under gdalwarp's default working type, with no
+  `Cast` at all. So the adapter always passes `-wt Float64` for a float source with any
+  method other than `Nearest` ([gdal-adapter.md](gdal-adapter.md#how-it-emits-a-warp)).
+- **gdal_translate and a plain VRT** (`gdal.Translate`, GTiff or VRT): `1e39` →
+  `FLT_MAX`, `-1e39` → `-FLT_MAX`, `3.5e38` → `FLT_MAX`, and also `inf` → `FLT_MAX` and
+  `-inf` → `-FLT_MAX`; NaN → NaN. This clamps genuine infinities as well, so it matches
+  neither `Infinity` nor `Clamp`, under which infinities stay infinite.
+
+So a `Warp` followed by a `Cast` that narrows to `float32` renders, with `Infinity`.
+A standalone `Cast` that narrows to `float32` uses GDAL's ordinary conversion, which no
+`OutOfRange` variant describes, so the adapter rejects it (purity rule 4; decided
+1 November, [dtypes.md](dtypes.md#decisions) question 9). A `float32` output that needs
+no narrowing is unaffected. If a real case needs that conversion, a "clamp including
+infinities" variant could be added.
+[fixtures/gdal/float32_narrowing.py](../fixtures/gdal/float32_narrowing.py) asserts all
+three behaviours and fails if a GDAL upgrade changes any of them. It is a seed for the
+#42 corpus that the meaning check in [gdal-adapter.md](gdal-adapter.md#done-when) uses.
+
+Other checks:
+
 - **NaN to an integer.** Without a nodata value, both paths write NaN as 0. The plan
   requires NaN to be missing and written as `missing.value`, so the adapter must render
   `-dstnodata` (warp) or the band's nodata (ordinary conversion). Whether GDAL then
@@ -262,11 +279,9 @@ Notes on the checks:
   hold only when the source already has the working type, or the source conversion is
   exact; otherwise the adapter uses a float working type or rejects.
 
-The float narrowing cases are guarded by the fixture in #50, a seed for the #42 corpus
-that the meaning check in [gdal-adapter.md](gdal-adapter.md#done-when) uses. The
-rounding, clamping and NaN cases above, and the `Collision` cells still marked "not yet
-checked", need fixtures in the same corpus, so that a GDAL upgrade that changes any of
-them is caught.
+The rounding, clamping and NaN cases above, and the `Collision` cells still marked
+"not yet checked", need fixtures in the same corpus, so that a GDAL upgrade that changes
+any of them is caught.
 
 ## Fusing a `Warp` and a `Cast`
 
