@@ -68,19 +68,19 @@ pub struct Plan {
 roadmap). None exists in the replacement IR yet. The variants named here are
 illustrative: design.md's extraction table lists `Open`, `Project`, `Select`, `Reduce`,
 `Scan`, `Rename`, `Drop` and `Rechunk`, and the proposals add `Warp`, `Cast` and #32's
-elementwise family. Operations hold their options; nodes hold the edges. A node's ID is its position, so it isn't stored in the
-node. Array data is never embedded: inputs are other nodes, and *external* data enters
-only through `Open` (and, until [question 7](#questions-for-review) is settled,
-`Warp`'s `GeometryBinding`). A literal scalar, such as the `2` in `a * 2`, is a
-zero-input node with no binding. #47 proposes it as `Constant(Scalar)`, with the
-operation defined in #32 and its wire form following #26's scalar encoding. This
-contract only allows such nodes; it doesn't decide them.
+elementwise family. Operations hold their options; nodes hold the edges. A node's ID is
+its position, so it isn't stored in the node. Array data is never embedded: inputs are
+other nodes, and *external* data enters only through `Open` (and, until [question
+7](#questions-for-review) is settled, `Warp`'s `GeometryBinding`). A literal scalar,
+such as the `2` in `a * 2`, is a zero-input node with no binding. #47 proposes it as
+`Constant(Scalar)`, with the operation defined in #32 and its wire form following #26's
+scalar encoding. This contract only allows such nodes; it doesn't decide them.
 
 **Who owns the nodes.** A `Graph` owns them. A rewrite takes `&mut Graph` and a root,
-appends to the graph in place, and returns a new root. Nothing is copied or removed, so
-every `NodeId` handed out earlier still indexes the same node. Several roots, the
-original and each rewrite's result, can live in one graph at once. A `Plan` pairs the
-graph with the one root being exported or executed.
+appends to the graph in place, and returns a new root. No existing node is changed or
+removed, so every `NodeId` handed out earlier still indexes the same node. Several
+roots, the original and each rewrite's result, can live in one graph at once. A `Plan`
+pairs the graph with the one root being exported or executed.
 
 ### Rules
 
@@ -99,11 +99,11 @@ graph with the one root being exported or executed.
    }
    ```
 
-   `Open` is `Exactly(0)`, as is a literal scalar node (#47). `Project`, `Cast` and an unweighted `Reduce` are
-   `Exactly(1)`; a weighted `Reduce` is `Exactly(2)`, its weights being the second
-   input. A `Select` takes one input plus one per array-valued indexer, such as a
-   computed mask (#36). A binary elementwise function is `Exactly(2)`, and a future
-   `Concat` is `AtLeast(1)`. The input count must match.
+   `Open` is `Exactly(0)`, as is a literal scalar node (#47). `Project`, `Cast` and an
+   unweighted `Reduce` are `Exactly(1)`; a weighted `Reduce` is `Exactly(2)`, its
+   weights being the second input. A `Select` takes one input plus one per array-valued
+   indexer, such as a computed mask (#36). A binary elementwise function is
+   `Exactly(2)`, and a future `Concat` is `AtLeast(1)`. The input count must match.
 4. **One root per plan.** A plan computes one result, the value of `root`. Several
    results share work by being several roots in one graph (see
    [questions](#questions-for-review)).
@@ -176,7 +176,7 @@ replaced input. Nodes off that path are reused as they are. See
 The arena therefore grows with every rewrite, so any termination measure applies to the
 live graph, not the arena. xrexpr's measure ("no rule lengthens a plan or moves an
 operation rightwards") was defined on chains, and pushing a `Select` below an `Add`
-adds a live node, so it needs restating for graphs. That belongs to the first rewrite
+can add a live node, so it needs restating for graphs. That belongs to the first rewrite
 proof (#37), not to this contract.
 
 ### Derived schemas and caching
@@ -248,7 +248,9 @@ Neither #15 nor #26 says how far a `DimId`, `VarId` or `GridId` reaches. With on
 - **Unequal grids under one dimension are rejected when combined.** If a shared
   `DimId` is placed on grids with unequal definitions in two inputs, an operation that
   combines them rejects the plan, as it would for unequal known extents. A `Warp` onto
-  one grid first resolves it. Each `Open` on its own stays valid.
+  one grid first resolves it: [warp.md](warp.md#validation) lets the target reuse the
+  source grid's dimension names once the source grid is gone. Each `Open` on its own
+  stays valid.
 - **Different axes with one name are renamed at lowering.** If `model`'s `time` is
   really forecast lead time, the host lowers it as `lead` and keeps its own name map,
   as design.md already requires for host symbols. Qualifying IDs by binding
@@ -469,7 +471,8 @@ Each has a recommendation.
    string IDs, which need uniqueness checks and a lookup table, and lose the
    cycle-free-by-construction property.
 4. **One root.** Recommended: one root per plan, with several results as several roots
-   in one graph. The alternative is a list of named roots in the plan itself.
+   in one graph. The alternative is a list of named roots in the plan itself. Either
+   way, rule 6 holds across every root a host binds together, not just per root.
 5. **Duplicate bindings (c).** Recommended: check rule 6 over live nodes only, so a
    rewrite can append a replacement `Open`. The stricter alternative counts dead nodes
    too, and bars rewrites from appending an `Open` for a binding already opened.
@@ -487,8 +490,10 @@ Each has a recommendation.
    wherever two datasets meet.
 9. **Dimensions across grids (a).** Recommended: a shared `DimId` asserts axis
    identity even when its grids' definitions differ, and combining such inputs is
-   rejected until a `Warp` makes them agree. The alternative is that each grid owns its
-   dimensions, so dimensions on differently defined grids must have different names.
+   rejected until a `Warp` makes them agree; warp.md lets the target reuse the source
+   grid's dimension names. The alternatives are a `Rename` before the `Warp`, so the
+   target needs no reused names, or that each grid owns its dimensions, so dimensions
+   on differently defined grids must always have different names.
 10. **Integer encoding.** Recommended: `NodeId` as a JSON number and 64-bit values as
     decimal strings. The alternative is decimal strings for all integers, which the #26
     review suggested; this proposal follows whichever rule #26 settles.

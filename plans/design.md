@@ -69,13 +69,13 @@ so that it agrees with the label rule below.
 Added on 27 October:
 
 - **A plan names its data by binding, not location.** External data enters a plan only
-  through `Open { binding: BindingId, schema }`: a local name and the declared schema
-  of the dataset it binds. *Proposed with [dag.md](dag.md), pending review; this
-  replaces "every plan starts with `Open`", which is chain wording. Until dag.md's
-  question 7 is settled, `Warp`'s `GeometryBinding` is a second entry point. A literal
-  scalar is a zero-input node with no binding (proposed in #47 and #32).* Mapping the binding to a URI, a byte-ref table or an in-memory array
-  happens outside the plan. A plan therefore validates offline and never fetches
-  anything when imported.
+  through `Open { binding: BindingId, schema }`: a local name and the declared schema of
+  the dataset it binds. *Proposed with [dag.md](dag.md), pending review; this replaces
+  "every plan starts with `Open`", which is chain wording. Until dag.md's question 7 is
+  settled, `Warp`'s `GeometryBinding` is a second entry point. A literal scalar is a
+  zero-input node with no binding (proposed in #47 and #32).* Mapping the binding to a
+  URI, a byte-ref table or an in-memory array happens outside the plan. A plan therefore
+  validates offline and never fetches anything when imported.
 - **`Open` binds a dataset, not one variable,** because the logical schema is
   dataset-level, as in xrexpr. Choosing a variable is a projection.
 - **Label selection is logical. Resolving it is not.** A label `Select` is representable
