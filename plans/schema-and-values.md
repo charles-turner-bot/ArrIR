@@ -99,8 +99,8 @@ validation rejects `Symbolic` there (`SymbolInDeclaredSchema`). Derived schemas 
   placements must refer to entities present in the schema.
 
 #16's `ArraySchema` put an extent on each dimension of one array. This dataset-level
-schema replaces it as the starting point for roadmap step 3. The legacy `effects.rs`
-that #15 moves into `arrir::legacy` keeps its own `ArraySchema` unchanged; legacy code
+schema replaces it as the starting point for roadmap step 3. #16's `effects.rs`,
+once moved into `arrir::legacy`, keeps its own `ArraySchema` unchanged; legacy code
 isn't extended (design.md).
 
 ## Spatial state is not an optional placement

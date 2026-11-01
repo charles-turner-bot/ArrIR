@@ -2,6 +2,10 @@ use serde::{Deserialize, Serialize};
 
 /// A dimension symbol, not a coordinate label or an array position.
 ///
+/// It is plan-wide and names named axes only; positional axes carry no `DimId`. Two
+/// axes with the same `DimId` are the same axis. That asserts nothing about their
+/// extents or labels, which are checked separately (`plans/dag.md`).
+///
 /// A newtype keeps dimensions distinct from variables even when spelled alike.
 /// ```compile_fail
 /// use arrir_types::{DimId, VarId};
@@ -25,6 +29,8 @@ impl DimId {
 
 /// A variable symbol. Coordinate membership will be a separate schema role.
 ///
+/// It is unique within one node's schema, not across the plan (`plans/dag.md`).
+///
 /// A coordinate variable and its dimension may have the same string name;
 /// their distinct types prevent accidental substitution in Rust APIs.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -32,28 +38,33 @@ impl DimId {
 pub struct VarId(String);
 
 impl VarId {
+    /// Accept any string symbol, as [`DimId::new`] does.
     pub fn new(value: impl Into<String>) -> Self {
         Self(value.into())
     }
 
+    /// Borrow the symbol.
     pub fn as_str(&self) -> &str {
         &self.0
     }
 }
 
-/// A plan-local symbol for externally supplied data, such as weights or a mask.
+/// A plan-local name for an external dataset, used as `Open { binding, schema }`.
 ///
-/// This is not a URL or a host pointer. Decoding it performs no lookup. A future
-/// adapter must check the binding's declared requirements before using its data.
+/// Each binding is opened by at most one live node. It is not a URL or a host pointer,
+/// and decoding it resolves nothing: the host supplies the data at bind time
+/// (`plans/design.md`, `plans/dag.md`).
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct BindingId(String);
 
 impl BindingId {
+    /// Accept any string symbol, as [`DimId::new`] does.
     pub fn new(value: impl Into<String>) -> Self {
         Self(value.into())
     }
 
+    /// Borrow the symbol.
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -61,15 +72,20 @@ impl BindingId {
 
 /// A grid symbol. Variables refer to a grid by this ID through their placement, so
 /// several variables can share one grid (`plans/grids.md`).
+///
+/// It is scoped to one node's schema. Two inputs share a grid only when their grid
+/// definitions are equal, never because their IDs match (`plans/dag.md`).
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct GridId(String);
 
 impl GridId {
+    /// Accept any string symbol, as [`DimId::new`] does.
     pub fn new(value: impl Into<String>) -> Self {
         Self(value.into())
     }
 
+    /// Borrow the symbol.
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -78,7 +94,7 @@ impl GridId {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::BTreeMap;
+    use std::collections::BTreeSet;
 
     #[test]
     fn ids_preserve_host_symbols_without_normalisation() {
@@ -118,12 +134,12 @@ mod tests {
     }
 
     #[test]
-    fn dimension_symbols_work_as_deterministic_map_keys() {
-        let dimensions = BTreeMap::from([(DimId::new("time"), 2_u64)]);
+    fn dimension_sets_serialise_in_a_deterministic_order() {
+        let dimensions = BTreeSet::from([DimId::new("time"), DimId::new("lat")]);
         let encoded = serde_json::to_string(&dimensions).unwrap();
-        assert_eq!(encoded, r#"{"time":2}"#);
+        assert_eq!(encoded, r#"["lat","time"]"#);
         assert_eq!(
-            serde_json::from_str::<BTreeMap<DimId, u64>>(&encoded).unwrap(),
+            serde_json::from_str::<BTreeSet<DimId>>(&encoded).unwrap(),
             dimensions
         );
     }
