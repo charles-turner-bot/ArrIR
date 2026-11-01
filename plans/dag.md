@@ -224,11 +224,14 @@ Neither #15 nor #26 says how far a `DimId`, `VarId` or `GridId` reaches. With on
 `Open` it didn't matter. With two, both datasets can have a `time` dimension and a
 `temp` variable, and the plan has to say whether they're the same thing.
 
-**Recommendation: dimensions are plan-wide; variables and grids are per schema.**
+**Recommendation: named dimensions are plan-wide; variables and grids are per schema.**
 
-- **`DimId` is plan-wide.** The same `DimId` in two `Open`s names one axis. This is
-  what named broadcasting (#34) needs, and it matches xarray, where dimension names are
-  the identity used for alignment.
+- **`DimId` is plan-wide, for named axes.** An axis is `AxisName::Named(DimId) |
+  Positional`, as #46 defines. The same `DimId` on named axes in two `Open`s names one
+  axis. This is what named broadcasting (#34) needs, and it matches xarray, where
+  dimension names are the identity used for alignment. Positional axes, from NumPy and
+  Array API hosts, carry no ID and are identified by trailing position (see #46,
+  shapes.md); the rules below about shared `DimId`s don't apply to them.
 - **A shared `DimId` asserts axis identity, nothing more.** It doesn't say the
   coordinate labels match, or that the extents are equal. `obs` may have 365 `time`
   steps and `model` 360. That's valid at `Open`. An operation that combines inputs
@@ -484,8 +487,9 @@ Each has a recommendation.
    `GeometryBinding`, which rule 6 doesn't cover, lets geometry be computed, and leaves
    `Open` as the only way external data enters. The alternative keeps the field and
    extends rule 6 to it.
-8. **ID scope.** Recommended: plan-wide `DimId`, with `VarId` and `GridId` scoped to
-   one node's schema, and renaming at lowering for distinct axes that share a name. The
+8. **ID scope.** Recommended: plan-wide `DimId` for named axes, with `VarId` and
+   `GridId` scoped to one node's schema, and renaming at lowering for distinct axes that
+   share a name. Positional axes carry no ID (#46). The
    alternative is per-`Open` scope for everything, with an explicit mapping operation
    wherever two datasets meet.
 9. **Dimensions across grids (a).** Recommended: a shared `DimId` asserts axis

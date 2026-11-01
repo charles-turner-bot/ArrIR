@@ -34,9 +34,9 @@ Details in [dag.md](dag.md). All pending review.
   place and return a new root, copying the path from the rewritten node up to the root.
 - **Arity depends on the operation value,** so a weighted `Reduce` or a `Select` with
   a computed mask takes extra inputs. `Project` keeps its array and dataset forms.
-- **`DimId` is plan-wide; `VarId` and `GridId` are per schema.** Neither #15 nor #26
-  set ID scope, and the review of #26 deferred it here. A shared dimension name asserts
-  one axis, not matching labels or extents.
+- **`DimId` is plan-wide for named axes; `VarId` and `GridId` are per schema.** Neither
+  #15 nor #26 set ID scope, and the review of #26 deferred it here. A shared dimension
+  name asserts one axis, not matching labels or extents.
 
 ## Not settled
 
