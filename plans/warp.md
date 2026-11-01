@@ -215,6 +215,14 @@ Definitions, all proposed:
   remapping, the method xESMF and ESMF call `conservative`. Both grids must be
   `PixelInterpretation::Area`, or meshes or DGGS cells.
 
+**A source cell with zero weight contributes nothing** to `Interpolate` or
+`Conservative`. It is left out of the sum, not added as `0 × value`. So a target centre
+that falls exactly on a source centre returns that source value, and an infinite source
+value never reaches a cell where its weight is zero: `0 × inf` would be NaN. Infinities
+with non-zero weight follow IEEE 754. One infinity makes the result that infinity, and
+`+inf` together with `-inf` gives NaN. gdalwarp breaks this rule with a `Float32`
+working type ([gdal-adapter.md](gdal-adapter.md#how-it-emits-a-warp)).
+
 `EdgeRule` exists because of the most common GDAL case: a swath with centre coordinates
 only. gdalwarp implies edges between centres. Making `Nearest` invalid without bounds
 would block that case. Implying edges silently would break purity rule 4. So the plan
