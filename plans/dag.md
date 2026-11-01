@@ -221,16 +221,18 @@ in #32, and until then it's rejected rather than guessed.
 
 ## ID scope across Opens
 
-Neither #15 nor #26 says how far a `DimId`, `VarId` or `GridId` reaches. With one
-`Open` it didn't matter. With two, both datasets can have a `time` dimension and a
-`temp` variable, and the plan has to say whether they're the same thing.
+#15 and #26 as first proposed didn't say how far a `DimId`, `VarId` or `GridId`
+reaches; #26 now defers to this section. With one `Open` it didn't matter. With two,
+both datasets can have a `time` dimension and a `temp` variable, and the plan has to
+say whether they're the same thing.
 
 **Decision: named dimensions are plan-wide; variables and grids are per schema.**
 
-- **`DimId` is plan-wide, for named axes.** An axis is `AxisName::Named(DimId) |
-  Positional`, as #46 defines. The same `DimId` on named axes in two `Open`s names one
-  axis. This is what named broadcasting (#46) needs, and it matches xarray, where
-  dimension names are the identity used for alignment. Positional axes, from NumPy and
+- **`DimId` is plan-wide, for named axes.** A schema stores an axis as
+  `VariableAxis::Named(DimId) | Positional(Extent)` (schema-and-values.md), and
+  inference views it as shapes.md's `Axis`. The same `DimId` on named axes in two
+  `Open`s names one axis. This is what named broadcasting (#46) needs, and it matches
+  xarray, where dimension names are the identity used for alignment. Positional axes, from NumPy and
   Array API hosts, carry no ID and are identified by trailing position (see #46,
   shapes.md); the rules below about shared `DimId`s don't apply to them.
 - **A shared `DimId` asserts axis identity, nothing more.** It doesn't say the
@@ -452,7 +454,7 @@ Wire rules:
 - `id` is written out for readability and must equal the node's position. It exists
   only on the wire.
 - `NodeId` is a `u32`, written as a JSON number, which every host reads exactly.
-  Extents and integer scalars are decimal strings
+  Every other integer, extents and scalars included, is a decimal string
   ([schema-and-values.md](schema-and-values.md#wire-contract-and-first-proof)).
 - Dead nodes may appear on the wire. Adapters and hosts ignore them. Export doesn't
   require compaction.
@@ -505,5 +507,6 @@ Each question was proposed with a recommendation. Charles accepted all of them o
    target needs no reused names, or that each grid owns its dimensions, so dimensions
    on differently defined grids must always have different names.
 10. **Integer encoding.** Decided: `NodeId` as a JSON number. #26 settles the rest:
-    every integer scalar and extent is a decimal string, and `u32` structural indices
-    are numbers ([schema-and-values.md](schema-and-values.md#wire-contract-and-first-proof)).
+    every integer is a decimal string, except an enumerated list of `u32` structural
+    indices that includes `NodeId`
+    ([schema-and-values.md](schema-and-values.md#wire-contract-and-first-proof)).

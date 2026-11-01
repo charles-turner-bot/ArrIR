@@ -21,7 +21,11 @@ References:
 
 ## Shapes are ordered axes with extents
 
-A shape is an ordered list of axes. Each axis has a name, or none, and an extent:
+A shape is an ordered list of axes. Each axis has a name, or none, and an extent. A
+schema stores axes as `VariableAxis` ([schema-and-values.md](schema-and-values.md)):
+`Named(DimId)`, whose extent is in the schema's `sizes`, or `Positional(Extent)`. The
+types below are the *derived view* inference works with, built per variable by looking
+named extents up in `sizes`. They are never stored or put on the wire.
 
 ```rust
 pub enum AxisName {
@@ -42,20 +46,24 @@ Order is part of the shape. A zero-dimensional array has no axes. Rank is always
 (#26); unknown rank is out of scope.
 
 - **A shape is named or positional, not mixed.** All its axes are `Named`, or all are
-  `Positional`. A zero-dimensional shape counts as either. A mixed shape is rejected
+  `Positional`. A zero-dimensional shape counts as both, so it combines with either
+  kind; a `Constant` (dtypes.md) is such a shape. A mixed shape is rejected
   (`MixedAxisNames`), for the reason xarray rejects an unnamed axis in a named result.
 - **Positional axes have no stored ID.** No `d0, d1, …` names are invented, so
   `x + x.T` on a square `x` and renumbering after `sum(axis=-1)` need nothing extra, and
-  two positional arrays in one `Open` don't have to agree on any extent. Operations
+  two positional arrays don't have to agree on any extent. (Each positional array has
+  its own `Open`, since a dataset with positional axes holds one variable;
+  schema-and-values.md.) Operations
   address positional axes by position, as the Array API's `axis` argument does.
 - **Grid placements need named axes.** A `GridPlacement` (grids.md) refers to its axes by
   `DimId`, so a positional axis can't be placed on a grid.
 
 ## Three kinds of extent
 
-#26 has `Extent::Known(u64) | Unknown`. Two unknowns there can't be told apart, so
-`a + a` with an unknown `time` can't be proven compatible with itself. This proposal
-adds a third variant:
+With only `Known(u64) | Unknown`, as #26 first proposed, two unknowns can't be told
+apart, so `a + a` with an unknown `time` can't be proven compatible with itself.
+`Extent` therefore has a third variant. This is the definition schema-and-values.md
+uses:
 
 ```rust
 pub enum Extent {
@@ -81,7 +89,7 @@ The variants have distinct roles:
   `SymbolInDeclaredSchema`.
 - **`Symbolic` is what inference derives.** Inference gives every non-known extent a
   size symbol, so derived schemas contain `Known` and `Symbolic` only.
-- **`Known(0)` is empty**, as in #26. It is not unknown.
+- **`Known(0)` is empty**, as in schema-and-values.md. It is not unknown.
 
 ## Size symbols are identified by structure
 
@@ -514,9 +522,10 @@ its own right, and a rewrite that swaps named operands needs it to keep their or
 
 #2 implements this in small PRs:
 
-1. `AxisName`, `Extent::Symbolic`, `SizeSymbol`, `MixedAxisNames` and
-   `SymbolInDeclaredSchema`, with serde tests showing that a declared schema with a size
-   symbol is rejected.
+1. `Extent::Symbolic`, `SizeSymbol`, `MixedAxisNames` and `SymbolInDeclaredSchema`
+   (stored in `arrir-types` with the schema's `VariableAxis`), plus the derived
+   `AxisName` and `Axis` view in `arrir`, with serde tests showing that a declared
+   schema with a size symbol is rejected.
 2. The size table and per-node inference for `Open`, `Project`, positional `Select` and
    `Reduce`, with checked element counts (from closed #1).
 3. Broadcasting for a test operation of any arity, named, positional and mixed, with

@@ -1,7 +1,8 @@
 # Logical schemas and values
 
-Status: proposal, 30 October 2026, revised 1 November after review. Details roadmap
-step 3 in [design.md](design.md). This defines extension points, not an instruction to
+Status: proposed 30 October 2026, revised and decided 1 November after review (see
+[Decisions](#decisions)); decided once merged. Details roadmap step 3 in
+[design.md](design.md). This defines extension points, not an instruction to
 implement every future variant. It builds on the decided [dag.md](dag.md),
 [shapes.md](shapes.md) and [dtypes.md](dtypes.md), and links to them rather than
 restating their rules.
@@ -68,13 +69,22 @@ validation rejects `Symbolic` there (`SymbolInDeclaredSchema`). Derived schemas 
 - A variable's axes are all `Named` or all `Positional` (shapes.md's `MixedAxisNames`).
   Its shape, as shapes.md defines it, is derived: a named axis's extent is looked up in
   `sizes`, and a positional axis carries its own.
+- **Positional axes appear only in `Array` results and their inputs.** Every
+  variable of a `Dataset` has named axes or none, with one exception: an `Open` of a
+  binding that holds a single NumPy or Array API array declares a `Dataset` with
+  exactly that one variable and no coordinates, because every `Open` declares a dataset
+  ([dag.md](dag.md#open-projection-and-result-kinds)). It is projected to an `Array`
+  before use. This is conservative and can be loosened later.
+- **A coordinate variable's axes are named, or it has none.** A positional array may
+  carry zero-dimensional coordinates only.
 - Dimension membership is derived from variables, as in xrexpr's `SchemaState`.
   `sizes` gives one extent for every named dimension some variable spans, and none for
   any other. It cannot create a dimension by itself. Grids cannot refer to missing
   dimensions.
 - **`sizes` is in canonical order:** dimensions in order of first appearance, walking
   `variables` in order and each variable's `dims` in order. Validation rejects any other
-  order, so two hosts produce the same bytes for the same schema (purity rule 7).
+  order, so two hosts produce the same bytes for the same schema (purity rule 2: plans
+  and schemas are serialisable values).
 - Coordinate membership is a role, not a dtype. An index coordinate spans exactly
   its named dimension, which must be a `Named` axis; an auxiliary coordinate may span
   several dimensions or none.
@@ -224,14 +234,17 @@ Statistics and regularity guesses cannot promote unknown facts into semantic gua
 ## Wire contract and first proof
 
 Use tagged enum variants and an explicit schema version inside the eventual plan wire
-format. Two integer rules, consistent with [dag.md](dag.md#wire-form):
+format. One integer rule, consistent with [dag.md](dag.md#wire-form):
 
-- **Values are strings.** Every integer `Scalar`, whatever its width, and every `Known`
-  extent is a canonical decimal string, so one rule covers all values and JavaScript
-  never rounds them through `Number`. Float bit patterns are fixed-width hexadecimal
-  strings.
-- **Structural indices are numbers.** `NodeId` and other `u32` indices, such as an axis
-  position, are JSON numbers, which every host reads exactly.
+- **Every integer is a canonical decimal string**, whatever its width or where it
+  appears: integer `Scalar`s, `Known` extents, warp.md's `WarpTarget.sizes`, grids.md's
+  `Range` start and step, slice bounds and positional indexers. JavaScript then never
+  rounds one through `Number`. Float bit patterns are fixed-width hexadecimal strings.
+- **The only exceptions are these `u32` structural indices**, written as JSON numbers,
+  which every host reads exactly:
+  - a `NodeId`, including each node's `id`, its `inputs` and the plan's `root`;
+  - an axis position addressing a positional axis, such as a reduction's `axis`.
+  Adding an exception means adding it to this list.
 
 Exact tags and examples land with the first serde fixtures, before adapters.
 An unknown semantic tag/version fails import. Adding a variant requires a supported
@@ -244,14 +257,20 @@ integers above 2^53 and invalid references. The next proof is Open â†’ Select â†
 bounded Reduce, round-tripped and executed through xrexpr before and after one rewrite.
 Future dtype families, packed decoding and physical planning do not block that slice.
 
-## Questions for review
+## Decisions
 
-1. **Where named extents live.** Proposed: one dataset-level `sizes`, in canonical
-   first-appearance order, is the only place a named dimension's extent is stated.
-   The alternative is shapes.md's `Axis { name, extent }` stored on every variable, with
-   validation that shared named axes agree. That matches shapes.md's struct directly,
-   but states each extent once per variable and adds a class of disagreement errors.
-   Recommended: dataset-level `sizes`, with each variable's shape derived.
-2. **Integers on the wire.** Proposed: every integer scalar and extent is a decimal
-   string, while `NodeId` and other `u32` indices stay JSON numbers (dag.md's
-   decision). The rule splits on "value or index", not on width. Recommended as written.
+Decided 1 November 2026, by Charles's standing rule of accepting conservative
+recommendations. Each can be loosened later without breaking existing plans.
+
+1. **Named extents live in dataset-level `sizes`,** in canonical first-appearance
+   order, and nowhere else. The alternative, shapes.md's `Axis { name, extent }` stored
+   on every variable, states each extent once per variable and adds a class of
+   disagreement errors. Each variable's shape is derived instead.
+2. **Every integer on the wire is a decimal string,** except the enumerated `u32`
+   structural indices ([above](#wire-contract-and-first-proof)).
+3. **Datasets are named.** Positional axes appear only in `Array` results, and a
+   coordinate variable has named axes or none. This is consistent with shapes.md's
+   `MixedAxisNames`, which already forbids mixing within one shape.
+4. **A source must not drop a declared placement, but Select may remove one.** This is
+   the grids.md placement rule as clarified [above](#spatial-state-is-not-an-optional-placement),
+   matching [grids.md's Select rules](grids.md#other-indexers).
