@@ -200,9 +200,10 @@ From #16, for positional semantics:
 - Positions are 0-based, and a negative position counts back from the end. Slices are
   half-open, with Python semantics. Adapters for hosts with other conventions translate
   them. R, for example, is 1-based and treats negative indices as exclusions.
-- A scalar indexer drops its dimension. Slices, position lists and masks never do. A host
-  whose indexing drops length-1 results (R's `drop = TRUE`) lowers those to scalar
-  indexers.
+- A scalar indexer drops its dimension. Slices, position lists and masks never do in
+  orthogonal mode; pointwise mode replaces the indexed axes with its indexers' broadcast
+  axes ([select.md](select.md)). A host whose indexing drops length-1 results (R's
+  `drop = TRUE`) lowers those to scalar indexers.
 - A positional mask must match the dimension length exactly. There is no recycling.
 - Label selections have unknown extent until they are resolved. In derived shapes that
   unknown is a size symbol with an identity ([shapes.md](shapes.md)).
@@ -278,7 +279,8 @@ do not omit a semantic field or its tests to satisfy the line count.
    point, widened to a dataset. Then, in separate PRs: grids, CRS and pixel
    interpretation, and staggered placements, as in [grids.md](grids.md).
 4. Positional indexer values, then label/advanced-index and binding values in
-   separate PRs. Preserve source distinctions used by rewrite proofs.
+   separate PRs. Preserve source distinctions used by rewrite proofs. Indexing modes
+   and computed indexers are proposed in [select.md](select.md).
 5. A deliberately bounded reduction specification with explicit result options;
    reject anything outside that supported subset.
 6. Reduce and Select operation structs, each with its effects (purity rule 3; `Select`'s
