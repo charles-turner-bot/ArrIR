@@ -375,6 +375,10 @@ pub enum ShapeRequirement {
     Equal { node: NodeId, axis: AxisRef, pair: [Extent; 2] },
     /// `staggered_dim`'s length is `centre_dim`'s plus `delta` (grids.md).
     StaggerOffset { node: NodeId, centre_dim: DimId, staggered_dim: DimId, delta: i8 },
+    /// Every literal position in `min..=max` is valid on `extent`: `-extent ≤ min` and
+    /// `max < extent` (select.md). Computed positions are not covered; the engine
+    /// checks those.
+    InRange { node: NodeId, axis: AxisRef, extent: Extent, min: i64, max: i64 },
 }
 ```
 
@@ -411,6 +415,8 @@ fine fail. Requirement sets are compared in a normal form, ignoring node IDs:
   `FitsNamed` per member, and a `Broadcastable` pair whose members both fit the same
   named extent is dropped as implied;
 - each `Equal` is an unordered pair;
+- each `InRange` becomes a lower bound `extent ≥ k`, with `k = max(max + 1, -min)`,
+  and for each extent only the largest bound is kept;
 - the result is a set, so duplicates from different nodes count once.
 
 So `a + b` and `b + a` agree, and so do `(a + b) + c` and `a + (b + c)`: both give the
@@ -445,6 +451,7 @@ pub enum RequirementViolated {
     NotBroadcastable { node: NodeId, axis: AxisRef, left: u64, right: u64 },
     DoesNotFitNamed { node: NodeId, dim: DimId, named: u64, positional: u64 },
     NotEqual { node: NodeId, axis: AxisRef, left: u64, right: u64 },
+    OutOfRange { node: NodeId, axis: AxisRef, extent: u64, min: i64, max: i64 },
     StaggerMismatch {
         node: NodeId,
         centre_dim: DimId,
