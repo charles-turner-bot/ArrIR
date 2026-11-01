@@ -43,7 +43,8 @@ multidimensional dataset.
 - **A warp with several resampling methods** renders as one warped VRT per method,
   each over the variables that use it, combined as below.
 - **A `Warp` followed by a `Cast`** of the warped variables renders as one warp, with
-  the cast's type and nodata ([cast.md](cast.md#fusing-a-warp-and-a-cast)). A `Cast` alone renders as a VRT band's data type. Narrowing
+  the cast's type and nodata ([cast.md](cast.md#fusing-a-warp-and-a-cast)). A `Cast`
+  alone renders as a VRT band's data type. Narrowing
   to `float32` renders after a `Warp` (one gdalwarp call or a warped VRT, with
   `Infinity`), but a standalone `Cast` that narrows to `float32` is rejected: GDAL's
   ordinary conversion clamps infinities too, which no `OutOfRange` variant describes
@@ -131,8 +132,10 @@ These settings are always written, so no gdalwarp default decides a result:
   ordinary conversion, which gives the table's "ordinary conversion" rows. A
   standalone `Cast` that narrows to `float32` is rejected, because that conversion
   clamps infinities (verified 1 November with GDAL 3.13.3). So are every `Wrap`, every
-  `bool` conversion, and, until a fixture shows GDAL writes the nodata value for NaN, a
-  float-to-integer `Cast` whose input has NaN missing.
+  `bool` conversion, and a standalone float-to-integer `Cast` whose input has NaN
+  missing: the ordinary conversion writes NaN as 0 whatever the nodata value. After a
+  `Warp`, that `Cast` renders with `-srcnodata nan -dstnodata v`, which writes `v`
+  (verified with GDAL 3.13.3, [cast.md](cast.md#what-gdalwarp-can-emit)).
 - A plan whose output variables don't fit one classic dataset (see [Output](#output)).
 
 ## Done when

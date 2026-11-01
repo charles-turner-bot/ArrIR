@@ -288,8 +288,9 @@ Valid ranges (CF's `valid_min`, `valid_max` and `valid_range`) aren't covered ye
 - Each listed variable has its placement dimensions replaced by the target's,
   inserted where the first of the old ones was. A `(time, row, column)` variable warped
   to a mesh becomes `(time, face)`. Its data type becomes the method's output type. Its
-  missing values become `Known { values: [empty_value], nan_is_missing }`, where
-  `nan_is_missing` is true when `empty_value` is NaN.
+  missing values become `Known { values: [], nan_is_missing: true }` when
+  `empty_value` is NaN, and `Known { values: [empty_value], nan_is_missing: false }`
+  otherwise.
 - The target grid enters the schema, with its coordinate variables from the model or
   from `target.geometry`. Warped variables are placed on it, at its primary location:
   `Centre` on both axes for `Horizontal`, a face for `Mesh`, a cell for `Dggs`.

@@ -12,7 +12,7 @@ This directory preserves the reasoning behind ArrIR, not just a list of features
   grids, the first step towards lowering plans to GDAL.
 - [Warp](warp.md): proposed. Reprojection and regridding between grids, with
   resampling defined independently of any engine.
-- [Cast](cast.md): proposed, revised by #38. Type conversion with rounding,
+- [Cast](cast.md): decided, revised by #38. Type conversion with rounding,
   out-of-range handling and missing values stated, compared against Array API, NumPy,
   xarray and GDAL.
 - [Dtypes](dtypes.md): decided. Promotion, Python scalars and reduction accumulators,

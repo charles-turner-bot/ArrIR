@@ -349,12 +349,13 @@ ArrIR never inserts a `Cast` implicitly. Lowering inserts one for:
 - a reduction output dtype that `ReductionTypes` can't express, after it;
 - missing values introduced into an integer variable (#34, #39).
 
-A conversion that can round needs care with missing values. An integer of 32 bits or
-more converted to `f32`, a 64-bit integer converted to `f64`, and `f64` narrowed to
-`f32` can all land a valid value on a missing sentinel. When the input's missing values
-include a sentinel other than NaN, such a `Cast` must set `missing` with an explicit
-`Collision` ([cast.md](cast.md#validation), #39). Nothing rounds onto NaN, so NaN alone
-needs neither.
+A conversion that isn't exact needs care with missing values. Rounding (an integer of
+32 bits or more converted to `f32`, a 64-bit integer converted to `f64`, `f64` narrowed
+to `f32`, float to integer) and `out_of_range` (`Clamp`, `Wrap`) can all land a valid
+value on a missing sentinel. When the input's missing values include a sentinel other
+than NaN, such a `Cast` must set `missing` with an explicit `Collision`
+([cast.md](cast.md#missing-values), #39). Nothing rounds, clamps or wraps onto NaN, so
+NaN alone needs neither.
 
 ## No Promote node
 

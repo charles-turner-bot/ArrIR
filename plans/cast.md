@@ -1,7 +1,7 @@
 # Cast
 
-Status: proposed 28 October 2026; revised by #38 on 1 November 2026, pending review.
-The float rules were decided with [dtypes.md](dtypes.md) on 1 November. Part of
+Status: proposed 28 October 2026; revised by #38 and decided on 1 November 2026. The
+float rules were decided with [dtypes.md](dtypes.md) the same day. Part of
 [the extraction contract](design.md). `Warp` ([warp.md](warp.md)) is its first user.
 The reasoning is in [the 28 October discussion](2026-10-28-discussion.md) and
 [the 1 November discussion](2026-11-01-discussion.md).
@@ -42,8 +42,8 @@ pub struct Cast {
 }
 
 pub enum CastTarget {
-    /// The input is an array (`ResultKind::Array`). Its payload variable is converted;
-    /// its coordinates are unchanged.
+    /// The input is an array (`ResultKind::Array`) whose payload has the `Data` role.
+    /// The payload is converted; its coordinates are unchanged.
     Array,
     /// The input is a dataset. These data variables are converted, in this order;
     /// every other variable is unchanged.
@@ -69,7 +69,8 @@ pub enum OutOfRange {
     /// Float to float only.
     Infinity,
     /// Keep the low bits: the value modulo 2^bits, read as two's complement for a
-    /// signed type. Integer to integer only.
+    /// signed type. Integer to integer only. The same rule as #32's wrapping integer
+    /// arithmetic.
     Wrap,
 }
 
@@ -84,7 +85,8 @@ pub struct MissingEncoding {
 pub enum Collision {
     /// Move it off `value`: to `value - 1` for an integer type, or `lowest + 1` when
     /// `value` is the lowest; to the next representable value toward the maximum for a
-    /// float type, or toward zero when `value` is the maximum.
+    /// float type, or toward zero when `value` is the largest finite value. A float
+    /// `value` must be finite; an infinite sentinel is rejected.
     Nudge,
     /// Write it unchanged. It then reads as missing.
     Keep,
@@ -94,8 +96,8 @@ pub enum Collision {
 `Cast` has one input (`Arity::Exactly(1)`, [dag.md](dag.md#rules)). `CastTarget`
 replaces the earlier `var: VarId`, which assumed a dataset input; `Project`
 ([dag.md](dag.md#open-projection-and-result-kinds)) produces either kind, and `Cast`
-accepts both without a merge operation. Variables that need different dtypes or policies
-take one `Cast` each.
+accepts both without a merge operation. Variables that need different dtypes or
+options take one `Cast` each.
 
 ## Conversion matrix
 
@@ -119,14 +121,19 @@ value is represented unchanged, so no option applies.
 
 Rules that sit beside the table:
 
-- Values are clamped, when `out_of_range` is `Clamp`, then rounded, as gdalwarp does.
-- Float to integer: every NaN must be missing in the input, and `missing` is required.
-  A NaN that isn't missing has no integer value. Infinities are out of range.
+- Values are rounded first, then range-checked. For an integer target with `Clamp`
+  this gives the same result as gdalwarp's clamp-then-round. Rounding first matters
+  for `Missing` (32767.4 rounds into `int16`'s range and is kept), for a float `Clamp`
+  (infinities stay infinite) and for `Infinity` (`nextafter(FLT_MAX)` rounds to
+  `FLT_MAX` and isn't out of range).
+- Float to integer: the input's missing values must have `nan_is_missing: true`, and
+  `missing` is required. A NaN that isn't missing has no integer value. Infinities are
+  out of range.
 - `Wrap` applies only between integer types, where it is NumPy's behaviour. A float has
   no low bits to keep, so float to integer can't wrap.
 - Array API leaves float-to-integer conversion of NaN and infinity "implementation-
-  dependent", and says nothing about other out-of-range values. ArrIR requires the
-  policy instead of inheriting either gap.
+  dependent", and says nothing about rounding or other out-of-range values. ArrIR
+  requires the policy instead of inheriting any of these gaps.
 - A reduction whose `result` is narrower than its accumulator uses the same float rules
   and the same `OutOfRange` ([dtypes.md](dtypes.md#rules)).
 
@@ -142,31 +149,39 @@ new type, and what happens when a valid value lands on it. Everything else is #3
 
 Two rules stay here because a conversion can't be stated without them:
 
-- **Collisions are explicit.** A conversion that can round needs `missing` whenever the
-  input's missing values include a sentinel other than NaN, so its `Collision` is
-  stated. A rounded valid value can otherwise land on that sentinel without the plan
-  saying it may ([dtypes.md](dtypes.md#casts-that-lowering-inserts)). Nothing rounds
-  onto NaN, so NaN alone doesn't need it.
+- **Collisions are explicit.** A conversion that isn't exact (it can round, or it has
+  `out_of_range`) needs `missing` whenever the input's missing values include a
+  sentinel other than NaN, so its `Collision` is stated. Otherwise a valid value can
+  land on that sentinel without the plan saying it may: by rounding, or by `Clamp` or
+  `Wrap` (int32 to int16 with sentinel 32767: 40000 clamps to it, 98303 wraps to it)
+  ([dtypes.md](dtypes.md#casts-that-lowering-inserts)). Nothing rounds, clamps or
+  wraps onto NaN, so NaN alone doesn't need it.
 - **No missing values in `bool`.** Converting a variable that may have missing values to
-  `bool` is rejected: either sentinel would collide with half of all valid values. #39
-  may lift this with a validity mask.
+  `bool` is rejected: either sentinel would collide with half of all valid values. A
+  `bool` source has no missing values either, NaN or sentinel, so converting from
+  `bool` never needs `missing`. #39 may lift both with a validity mask.
 
 ## Effect on the schema
 
 - Each converted variable's data type becomes `dtype`.
-- With `missing`, its missing values become `Known { values: [missing.value],
-  nan_is_missing }`, where `nan_is_missing` is true when `missing.value` is NaN.
+- With `missing`, its missing values become `Known { values: [], nan_is_missing: true }`
+  when `missing.value` is NaN, and `Known { values: [missing.value], nan_is_missing:
+  false }` otherwise. `values` never holds a NaN
+  ([schema-and-values.md](schema-and-values.md#missing-values-and-decoding)).
 - Without it, they're unchanged.
 - The result kind, dimensions, extents, coordinates and grid placement are unchanged.
 
 ## Validation
 
-- `CastTarget::Array` needs an array input; `Variables` needs a dataset input and a
-  non-empty list of distinct data variables present in it.
-- The input's missing values are `Known` whenever `missing` is set, or the conversion
-  is float to integer.
+- `CastTarget::Array` needs an array input whose payload has the `Data` role. A payload
+  with a coordinate role is rejected (decision 4). `Variables` needs a dataset input
+  and a non-empty list of distinct data variables present in it.
+- The input's missing values are `Known` whenever `missing` is set. For float to
+  integer they are `Known` with `nan_is_missing: true`.
 - `rounding` and `out_of_range` are present exactly when the matrix requires them, for
-  every converted variable, and `out_of_range` is one the matrix allows.
+  every converted variable, and `out_of_range` is one the matrix allows. So every
+  variable in one `Cast` needs the same options: a dataset whose variables need
+  different ones takes one `Cast` per group.
 - `missing.value` is representable in `dtype`, and `Missing` is used only with
   `missing`.
 - The collision and `bool` rules above hold.
@@ -180,9 +195,11 @@ Two rules stay here because a conversion can't be stated without them:
 `CastTarget::Array`. `copy` decides whether an unchanged array may be returned as the
 same object. That's aliasing, an execution concern, so ArrIR doesn't represent it.
 `device` is placement, also outside the logical plan (design.md). Every value rule the
-spec states is a row of the matrix. Where it leaves a gap (NaN, infinity and
-out-of-range values to an integer type), the plan states a policy, so a plan is stricter
-than the spec, never looser.
+spec states is a row of the matrix. The spec states the `bool` rules and that NaN and
+infinity to an integer type are "implementation-dependent"; it says nothing about how
+float to integer rounds, or about other out-of-range values. Lowering takes those from
+its host: NumPy and array-api-strict 2.6.1 truncate (`TowardZero`). So a plan is
+stricter than the spec, never looser.
 
 **NumPy's `casting=` levels** gate which dtype pairs `astype` accepts; they change no
 value. Lowering applies the gate and either emits a `Cast` or rejects, as NumPy would:
@@ -190,8 +207,8 @@ value. Lowering applies the gate and either emits a `Cast` or rejects, as NumPy 
 | Level | Accepts | Lowering |
 | --- | --- | --- |
 | `no`, `equiv` | the same dtype (byte order is storage, not a `DType`) | no node |
-| `safe` | exact conversions | `Cast` with no options |
-| `same_kind` | also narrowing within a kind, such as `float64` → `float32` | `Cast` with the matrix's options |
+| `safe` | NumPy's safe set: exact conversions, and also `int64` and `uint64` → `float64`, which round | `Cast` with the matrix's options (none), plus `missing` if the collision rule applies |
+| `same_kind` | also narrowing within a kind (`float64` → `float32`, `int64` → `int8`), sign changes (`uint64` → `int8`) and integer → float (`int32` → `float32`) | `Cast` with the matrix's options |
 | `unsafe` (the default) | anything | `Cast` with the matrix's options |
 | `same_value` | anything, failing at run time if a value changes | rejected: a run-time check is not a policy ArrIR has |
 
@@ -200,11 +217,24 @@ value. Lowering applies the gate and either emits a `Cast` or rejects, as NumPy 
 | Conversion | Result | ArrIR |
 | --- | --- | --- |
 | float → integer | truncates: 2.7 → 2, -2.7 → -2 | `TowardZero` |
-| float → integer, out of range or NaN | platform-dependent: `1e6` → 16960 and `inf` → -1 as `int16`; `inf` → `INT64_MAX` as `int64` on this build; NaN → 0 | no faithful policy; see question 2 |
+| float → integer, out of range, infinite or NaN | undefined in NumPy, with `RuntimeWarning: invalid value encountered in cast`; on arm64 it depends on the target width (table below) | none; lowering rejects (decision 2) |
 | integer → narrower integer | wraps: 40000 → -25536 as `int16`, 300 → 44 as `uint8` | `Wrap` |
 | `int64` → `float32` | 16777217 → 16777216 | ties to even (no option) |
 | `float64` → `float32` | overflows to ±inf | `Infinity` |
 | to and from `bool` | as Array API | the matrix |
+
+NumPy 2.5.4 on macOS arm64, out-of-range float to integer. 32- and 64-bit targets
+saturate; narrower ones saturate to `int32` and then wrap, so `-1.0` gives 255 as `uint8`
+but 0 as `uint32`. NumPy calls these values undefined, and x86 is reported to give
+`INT_MIN` instead; that wasn't tested.
+
+| Input | int8 | int16 | int32 | int64 | uint8 | uint32 | uint64 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `1e6` | 64 | 16960 | 1000000 | 1000000 | 64 | 1000000 | 1000000 |
+| `inf` | -1 | -1 | INT32_MAX | INT64_MAX | 255 | UINT32_MAX | UINT64_MAX |
+| `-inf` | 0 | 0 | INT32_MIN | INT64_MIN | 0 | 0 | 0 |
+| NaN | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| `-1.0` | -1 | -1 | -1 | -1 | 255 | 0 | 0 |
 
 An adapter emitting NumPy uses a bare `astype` only where NumPy's result is defined and
 matches the plan. Otherwise it composes the conversion, for example `np.clip` then
@@ -212,10 +242,14 @@ matches the plan. Otherwise it composes the conversion, for example `np.clip` th
 `np.where` from `missing`. Or it rejects the node.
 
 **xarray** (2026.9.0, checked): `DataArray.astype` converts the data and leaves
-coordinates alone, which is `CastTarget::Array`. `Dataset.astype` converts the data
-variables and leaves every coordinate, index or not, unchanged, which is
-`CastTarget::Variables` listing the data variables in schema order. Its numerics are
-NumPy's. `keep_attrs` is an attribute policy, which #26 owns.
+coordinates alone, which is `CastTarget::Array`. Called on a coordinate
+(`ds.x.astype("int16")`), it returns a converted payload named `x` while `ds`'s `x`
+coordinate stays `float64`. ArrIR can't express that split, since payload and
+coordinate would share one `VarId`, so `Array` requires the `Data` role.
+`Dataset.astype` converts every data variable, integer and float alike, and leaves
+every coordinate, index or not, unchanged. That is one `CastTarget::Variables` per
+group of data variables that need the same options. Its numerics are NumPy's.
+`keep_attrs` is an attribute policy, which #26 owns.
 
 ## What gdalwarp can emit
 
@@ -226,10 +260,10 @@ data type; `gdal_translate` behaves the same. GDAL has no `bool` type.
 | GDAL path | `Rounding` | `OutOfRange` | `Collision` |
 | --- | --- | --- | --- |
 | gdalwarp, integer working type (`-wt` set to the output type), interpolating kernel | `NearestTiesUp` (bilinear: -2.5 → -2, -0.5 → 0) | `Clamp` | `Nudge` (not yet checked) |
-| gdalwarp, integer working type, `-r near` | `NearestTiesAway` (-2.5 → -3) on the conversion into the working type | `Clamp` | `Nudge` (not yet checked) |
-| gdalwarp, float working type, integer output | `NearestTiesAway` (2.5 → 3, -2.5 → -3, 3.5 → 4) | `Clamp` (`1e6` → 32767, `inf` → 32767) | `Keep` (the nudge is undone by rounding; not yet checked) |
-| gdalwarp, float working type (`Float64` unless `Nearest`), float output | none needed | `Infinity` (verified) | `Nudge` (not yet checked) |
-| ordinary conversion, integer output from float | `NearestTiesAway` | `Clamp` | `Keep` (not yet checked) |
+| gdalwarp, integer working type, `-r near` | `NearestTiesAway` (-2.5 → -3) on the conversion into the working type | `Clamp` | `Nudge` (-9999 → -10000) |
+| gdalwarp, float working type, integer output | `NearestTiesAway` (2.5 → 3, -2.5 → -3, 3.5 → 4) | `Clamp` (`1e6` → 32767, `inf` → 32767) | `Keep` (-9999.0 and -9999.4 → -9999: the nudge is undone by rounding) |
+| gdalwarp, float working type (`Float64` unless `Nearest`), float output | none needed | `Infinity` (verified) | `Nudge` (-9999 → -9998.999999999998) |
+| ordinary conversion, integer output from float | `NearestTiesAway` (2.5 → 3, -2.5 → -3) | `Clamp` (`1e6` and `inf` → 32767) | `Keep` (-9999.4 → -9999) |
 | ordinary conversion, integer output from integer | none needed | `Clamp` (40000 → 32767, -5 → 0 as `Byte`) | `Keep` (not yet checked) |
 | ordinary conversion, float output from integer | ties to even (16777217 → 16777216 as `Float32`) | none needed | `Keep` (not yet checked) |
 | ordinary conversion, float output from float | none needed | none: clamps infinities too, so rejected | — |
@@ -268,11 +302,17 @@ three behaviours and fails if a GDAL upgrade changes any of them. It is a seed f
 
 Other checks:
 
-- **NaN to an integer.** Without a nodata value, both paths write NaN as 0. The plan
-  requires NaN to be missing and written as `missing.value`, so the adapter must render
-  `-dstnodata` (warp) or the band's nodata (ordinary conversion). Whether GDAL then
-  writes the nodata value for NaN is not yet checked; until a fixture shows it, the
-  adapter rejects a float-to-integer `Cast` whose input has NaN missing.
+- **NaN to an integer.** The plan requires NaN to be missing and written as
+  `missing.value`. Into `Int16` with `missing.value` -9999, `[nan, 1]` gives:
+  - `gdal.Warp(dstNodata=-9999)` with no source nodata: `[0, 1]`;
+  - the same warp with source nodata NaN (`-srcnodata nan -dstnodata -9999`):
+    `[-9999, 1]`;
+  - `gdal.Translate(noData=-9999)`: `[0, 1]`.
+
+  So a warp renders a float-to-integer `Cast` with NaN missing by passing
+  `-srcnodata nan -dstnodata v`. The ordinary conversion writes NaN as 0 whatever the
+  nodata value, so a standalone float-to-integer `Cast` whose input has NaN missing is
+  rejected.
 - **Two rounding rules with an integer working type.** The source is first converted
   into the working type with ties away from zero, then an interpolating kernel's result
   is rounded half up. Plans that ask for one rule on an interpolating warp therefore
@@ -281,7 +321,9 @@ Other checks:
 
 The rounding, clamping and NaN cases above, and the `Collision` cells still marked
 "not yet checked", need fixtures in the same corpus, so that a GDAL upgrade that changes
-any of them is caught.
+any of them is caught. Fixtures for the rounding rows use sources at least two rows
+tall: on a one-row source, bilinear with a float working type returned shifted source
+values instead of averages, while a six-row source averaged as expected.
 
 ## Fusing a `Warp` and a `Cast`
 
@@ -297,23 +339,29 @@ does, may emit `Warp` followed by `Cast` as one call when both are true:
 Otherwise the adapter emits two steps or rejects. Neither operation changes because it
 was fused, and a rewrite never merges them into one node.
 
-## Questions for review
+## Decisions
 
-1. **`CastTarget` with two forms, or array-only `Cast`.** Recommended: two forms. An
-   array-only `Cast` would need a dataset-rebuilding operation, which doesn't exist, to
-   express `Dataset.astype` or a `Warp` of several variables followed by a `Cast`.
-2. **NumPy float to integer out of range.** NumPy's result is platform-dependent, so no
-   policy reproduces it. Recommended: lowering from NumPy writes `TowardZero` with
-   `Clamp`, recorded as a refinement. The plan is defined where NumPy isn't, and is
-   identical wherever NumPy's result is defined. The alternative is rejecting every
-   NumPy float-to-integer `astype`, which is common.
-3. **Add `Wrap`.** Recommended: yes, for integer to integer only, so NumPy's integer
-   narrowing lowers faithfully. GDAL rejects it.
-4. **Casting coordinate variables.** `CastTarget::Variables` names data variables only,
-   matching xarray, which never converts coordinates through `astype`. Converting an
-   index coordinate changes the labels that alignment (#34) reads. Recommended: reject
-   until #34 or a real case needs it.
-5. **`bool` and missing values.** Recommended: reject, as above, until #39 decides
-   validity masks.
-6. **`same_value`.** Recommended: reject at lowering. A checked conversion that fails at
-   run time is a new kind of policy; add it only for a concrete case.
+Decided 1 November 2026, taking the review's recommendations.
+
+1. **`CastTarget` has two forms.** An array-only `Cast` would need a dataset-rebuilding
+   operation, which doesn't exist, to express `Dataset.astype` or a `Warp` of several
+   variables followed by a `Cast`. An `Array` payload must have the `Data` role, and a
+   dataset whose variables need different options takes one `Cast` per group.
+2. **A bare NumPy float-to-integer `astype` is rejected at lowering.** NumPy calls
+   out-of-range, infinite and NaN results undefined and warns; its results vary with
+   the target width as well as the platform. A NaN that isn't declared missing can't be
+   lowered anyway. A plan may still write an explicit `Cast` with `TowardZero` and
+   `Clamp` or `Missing`. Loosening this, for example lowering to `TowardZero` with
+   `Clamp` as a recorded refinement, needs a NaN rule first.
+3. **`Wrap` is added, integer to integer only.** NumPy's integer narrowing is
+   deterministic on every platform checked, matches #32's wrapping integer arithmetic,
+   and has no other faithful lowering. GDAL rejects it.
+4. **Coordinate variables aren't cast.** `CastTarget::Variables` names data variables
+   only, and `CastTarget::Array` requires a `Data` payload. xarray's `astype` never
+   converts a coordinate in place, and converting an index coordinate changes the
+   labels that alignment (#34) reads. Revisit when #34 or a real case needs it.
+5. **`bool` with missing values is rejected** until #39 decides validity masks. GDAL
+   has no `bool` type.
+6. **`same_value` is rejected at lowering.** It is a run-time check, not a value
+   policy; NumPy raises `ValueError` when a value changes (checked). Add it only for a
+   concrete case.
