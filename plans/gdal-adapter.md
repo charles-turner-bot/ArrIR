@@ -91,7 +91,8 @@ These settings are always written, so no gdalwarp default decides a result:
   both, gdalwarp's inversion is `EdgeRule::MidpointsBetweenCentres`, as Mike's tests in
   hypertidy/rwarp#2 show.
 - **Mode ties:** `MODE_TIES=MIN` or `MAX`, which needs GDAL 3.11 or later.
-- **Types and nodata:** `-ot`, `-wt` and `-dstnodata`, from the `Cast` that follows the
+- **Types and nodata:** `-ot`, `-wt`, `-dstnodata` and, for a NaN-missing float
+  source, `-srcnodata nan`, from the `Cast` that follows the
   warp, by the table in [cast.md](cast.md#what-gdalwarp-can-emit). Without a `Cast`, the
   output and working types are the method's output type, and `-dstnodata` is
   `empty_value`. For a float source with any method other than `Nearest`, `-wt` is
@@ -132,8 +133,8 @@ These settings are always written, so no gdalwarp default decides a result:
   ordinary conversion, which gives the table's "ordinary conversion" rows. A
   standalone `Cast` that narrows to `float32` is rejected, because that conversion
   clamps infinities (verified 1 November with GDAL 3.13.3). So are every `Wrap`, every
-  `bool` conversion, and a standalone float-to-integer `Cast` whose input has NaN
-  missing: the ordinary conversion writes NaN as 0 whatever the nodata value. After a
+  `bool` conversion, and every standalone float-to-integer `Cast` (its input always has
+  NaN missing): the ordinary conversion writes NaN as 0 whatever the nodata value. After a
   `Warp`, that `Cast` renders with `-srcnodata nan -dstnodata v`, which writes `v`
   (verified with GDAL 3.13.3, [cast.md](cast.md#what-gdalwarp-can-emit)).
 - A plan whose output variables don't fit one classic dataset (see [Output](#output)).

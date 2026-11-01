@@ -97,7 +97,7 @@ pub enum Collision {
 replaces the earlier `var: VarId`, which assumed a dataset input; `Project`
 ([dag.md](dag.md#open-projection-and-result-kinds)) produces either kind, and `Cast`
 accepts both without a merge operation. Variables that need different dtypes or
-options take one `Cast` each.
+options take one `Cast` per group.
 
 ## Conversion matrix
 
@@ -208,9 +208,12 @@ value. Lowering applies the gate and either emits a `Cast` or rejects, as NumPy 
 | --- | --- | --- |
 | `no`, `equiv` | the same dtype (byte order is storage, not a `DType`) | no node |
 | `safe` | NumPy's safe set: exact conversions, and also `int64` and `uint64` → `float64`, which round | `Cast` with the matrix's options (none), plus `missing` if the collision rule applies |
-| `same_kind` | also narrowing within a kind (`float64` → `float32`, `int64` → `int8`), sign changes (`uint64` → `int8`) and integer → float (`int32` → `float32`) | `Cast` with the matrix's options |
+| `same_kind` | also narrowing within a kind (`float64` → `float32`, `int64` → `int8`), unsigned → signed (`uint64` → `int8`; signed → unsigned is `unsafe` only) and integer → float (`int32` → `float32`) | `Cast` with the matrix's options |
 | `unsafe` (the default) | anything | `Cast` with the matrix's options |
 | `same_value` | anything, failing at run time if a value changes | rejected: a run-time check is not a policy ArrIR has |
+
+At every level, lowering adds `missing` with `Collision::Keep`, which is what NumPy
+does, whenever the collision rule applies.
 
 **What NumPy computes** (NumPy 2.5.4, checked):
 
@@ -263,7 +266,7 @@ data type; `gdal_translate` behaves the same. GDAL has no `bool` type.
 | gdalwarp, integer working type, `-r near` | `NearestTiesAway` (-2.5 → -3) on the conversion into the working type | `Clamp` | `Nudge` (-9999 → -10000) |
 | gdalwarp, float working type, integer output | `NearestTiesAway` (2.5 → 3, -2.5 → -3, 3.5 → 4) | `Clamp` (`1e6` → 32767, `inf` → 32767) | `Keep` (-9999.0 and -9999.4 → -9999: the nudge is undone by rounding) |
 | gdalwarp, float working type (`Float64` unless `Nearest`), float output | none needed | `Infinity` (verified) | `Nudge` (-9999 → -9998.999999999998) |
-| ordinary conversion, integer output from float | `NearestTiesAway` (2.5 → 3, -2.5 → -3) | `Clamp` (`1e6` and `inf` → 32767) | `Keep` (-9999.4 → -9999) |
+| ordinary conversion, integer output from float (evidence only: never emitted, see NaN below) | `NearestTiesAway` (2.5 → 3, -2.5 → -3) | `Clamp` (`1e6` and `inf` → 32767) | `Keep` (-9999.4 → -9999) |
 | ordinary conversion, integer output from integer | none needed | `Clamp` (40000 → 32767, -5 → 0 as `Byte`) | `Keep` (not yet checked) |
 | ordinary conversion, float output from integer | ties to even (16777217 → 16777216 as `Float32`) | none needed | `Keep` (not yet checked) |
 | ordinary conversion, float output from float | none needed | none: clamps infinities too, so rejected | — |
@@ -311,8 +314,10 @@ Other checks:
 
   So a warp renders a float-to-integer `Cast` with NaN missing by passing
   `-srcnodata nan -dstnodata v`. The ordinary conversion writes NaN as 0 whatever the
-  nodata value, so a standalone float-to-integer `Cast` whose input has NaN missing is
-  rejected.
+  nodata value. Every float-to-integer `Cast` has NaN missing, so a standalone one is
+  rejected. A hand-written VRT `ComplexSource` with `<NODATA>nan</NODATA>` and band
+  `NoDataValue` -9999 does write -9999 (and -9999.4 → -9999, `Keep`), verified with
+  GDAL 3.13.3; it is a possible later rendering, not used yet.
 - **Two rounding rules with an integer working type.** The source is first converted
   into the working type with ties away from zero, then an interpolating kernel's result
   is rounded half up. Plans that ask for one rule on an interpolating warp therefore
@@ -346,7 +351,8 @@ Decided 1 November 2026, taking the review's recommendations.
 1. **`CastTarget` has two forms.** An array-only `Cast` would need a dataset-rebuilding
    operation, which doesn't exist, to express `Dataset.astype` or a `Warp` of several
    variables followed by a `Cast`. An `Array` payload must have the `Data` role, and a
-   dataset whose variables need different options takes one `Cast` per group.
+   dataset whose variables need different options takes one `Cast` per group. Revisit
+   if a dataset-rebuilding operation (`Merge`) is added.
 2. **A bare NumPy float-to-integer `astype` is rejected at lowering.** NumPy calls
    out-of-range, infinite and NaN results undefined and warns; its results vary with
    the target width as well as the platform. A NaN that isn't declared missing can't be
@@ -360,6 +366,9 @@ Decided 1 November 2026, taking the review's recommendations.
    only, and `CastTarget::Array` requires a `Data` payload. xarray's `astype` never
    converts a coordinate in place, and converting an index coordinate changes the
    labels that alignment (#34) reads. Revisit when #34 or a real case needs it.
+   This includes a promotion `Cast` that lowering would insert for arithmetic on a
+   coordinate payload (`ds.x + 1.5` with an `int32` index `x`), so that arithmetic is
+   rejected at lowering too.
 5. **`bool` with missing values is rejected** until #39 decides validity masks. GDAL
    has no `bool` type.
 6. **`same_value` is rejected at lowering.** It is a run-time check, not a value
