@@ -23,6 +23,9 @@ This directory preserves the reasoning behind ArrIR, not just a list of features
 - [Symbolic shapes](shapes.md): decided. Named and positional axes, known, symbolic
   and unknown extents, and broadcasting by name or by position, with requirements
   checked at bind, label resolution or execution.
+- [Elementwise](elementwise.md): decided. The `Elementwise` operation and its
+  functions, integer overflow and division by zero, non-finite values, and the output
+  schema.
 - [Select and indexing modes](select.md): decided. Literal and computed indexers,
   orthogonal and pointwise modes, and their shape effects.
 - [Array API coverage](array-api-coverage.md): audit. How each Array API 2025.12
@@ -38,8 +41,8 @@ This directory preserves the reasoning behind ArrIR, not just a list of features
 - [31 October 2026 discussion](2026-10-31-discussion.md): why plans become DAGs, and
   the 1 November decisions on the graph, shapes and dtypes.
 - [1 November 2026 discussion](2026-11-01-discussion.md): the second design round,
-  including the decided schema, Select, and the `Cast` review against Array API
-  `astype`, NumPy, xarray and GDAL.
+  including the decided schema, Select, the `Cast` review against Array API `astype`,
+  NumPy, xarray and GDAL, and the elementwise family.
 
 Update these notes when a decision changes, stating what changed and why.
 Distinguish proposed designs from implemented behaviour. Passing type/unit tests

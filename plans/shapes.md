@@ -538,7 +538,7 @@ its own right, and a rewrite that swaps named operands needs it to keep their or
 3. Broadcasting for a test operation of any arity, named, positional and mixed, with
    each worked example and each row of the xarray table above as a test, including the
    requirements it records and the output axis order. #33 then uses it for `Add`, `Multiply`
-   and `GreaterThan`.
+   and `Greater` ([elementwise.md](elementwise.md)).
 4. The requirement check, with `RequirementViolated` tests at bind and at label
    resolution.
 

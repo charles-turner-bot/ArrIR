@@ -73,12 +73,12 @@ Each function appears once. Proposed representation is in the third column.
 | **Data types** | | |
 | `astype` | Direct | `Cast`, [cast.md](cast.md), #38. Stricter than the spec: rounding and out-of-range policies are explicit where the spec leaves them implementation-defined. |
 | `can_cast`, `result_type`, `isdtype`, `finfo`, `iinfo`, dtype `__eq__` | Meta | Promotion table in dtypes.md. |
-| **Elementwise**, grouped by what #32 still has to state | | |
+| **Elementwise**, specified in [elementwise.md](elementwise.md) (#32) except where a row says otherwise | | |
 | `add`, `multiply`, `greater` | Direct | First `Elementwise` variants, #32; to be implemented in #33. |
-| `subtract`, `negative`, `abs`, `square`, `pow`, `floor_divide`, `remainder`, `bitwise_left_shift`, `bitwise_right_shift` | Direct | #32 variants. Need integer overflow, division-by-zero and shift-count rules. |
-| `divide`, `sqrt`, `reciprocal`, `maximum`, `minimum`, `hypot`, `copysign`, `nextafter`, `logaddexp`, `sign` | Direct | #32 variants. Need NaN, infinity and signed-zero rules. |
-| `exp`, `expm1`, `log`, `log1p`, `log2`, `log10`, `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2`, `sinh`, `cosh`, `tanh`, `asinh`, `acosh`, `atanh` | Direct | #32 variants. Need stated tolerances; bitwise equality across engines isn't promised. |
-| `equal`, `not_equal`, `greater_equal`, `less`, `less_equal`, `logical_and`, `logical_or`, `logical_xor`, `logical_not`, `bitwise_and`, `bitwise_or`, `bitwise_xor`, `bitwise_invert`, `positive`, `ceil`, `floor`, `trunc`, `round`, `isnan`, `isinf`, `isfinite`, `signbit` | Direct | #32 variants. Exact; need only operand domains. `round` ties to even, distinct from `Cast`'s `Rounding`. `isnan` is not "is missing" (#39). |
+| `subtract`, `negative`, `abs`, `square`, `pow`, `floor_divide`, `remainder`, `bitwise_left_shift`, `bitwise_right_shift` | Direct | #32 variants. Integers wrap; `pow`, `floor_divide` and `remainder` are integer-only for now (float deferred). Shifts still need shift-count rules. |
+| `divide`, `sqrt`, `reciprocal`, `maximum`, `minimum`, `hypot`, `copysign`, `nextafter`, `logaddexp`, `sign` | Direct | #32 variants. `divide`, `maximum`, `minimum` and `sign` are specified; `sqrt`, `reciprocal`, `hypot`, `copysign`, `nextafter` and `logaddexp` still need NaN, infinity and signed-zero rules. |
+| `exp`, `expm1`, `log`, `log1p`, `log2`, `log10`, `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2`, `sinh`, `cosh`, `tanh`, `asinh`, `acosh`, `atanh` | Direct | #32 variants. Need an accuracy contract, written as a named permission (dtypes.md decision 5); bitwise equality across engines isn't promised. |
+| `equal`, `not_equal`, `greater_equal`, `less`, `less_equal`, `logical_and`, `logical_or`, `logical_xor`, `logical_not`, `bitwise_and`, `bitwise_or`, `bitwise_xor`, `bitwise_invert`, `positive`, `ceil`, `floor`, `trunc`, `round`, `isnan`, `isinf`, `isfinite`, `signbit` | Direct | #32 variants. Exact; specified except the bitwise functions and `positive`. `round` ties to even, distinct from `Cast`'s `Rounding`. `isnan` is not "is missing" (#39). |
 | `clip` | Compose | `maximum` then `minimum`; scalar promotion as clarified in 2025.12 (dtypes.md). |
 | `conj`, `real`, `imag` | Deferred | Complex dtypes (#26, dtypes.md). |
 | **Indexing** | | |
@@ -106,7 +106,7 @@ Each function appears once. Proposed representation is in the third column.
 | `argmax`, `argmin`, `count_nonzero` | Direct | `Reduce` variants (roadmap step 5). Lowering states the index or counter dtype, as dtypes.md does for `count_nonzero`. |
 | `nonzero` | Deferred | Its extent is Runtime (`CountNonZero`, shapes.md) and its order row-major. Boolean indexing (#36) covers the use case. |
 | `searchsorted` | Deferred | Known output shape, but needs a sortedness precondition planning can't check. Label resolution, its main use, is outside the core. |
-| `where` | Blocked | A ternary member of #32's `Elementwise` family (decided 1 November, see [Decisions](#decisions)). Blocked until #32 specifies it. |
+| `where` | Direct | `Where`, a ternary `Elementwise` variant ([elementwise.md](elementwise.md); decided 1 November, see [Decisions](#decisions)). |
 | **Sets** | | |
 | `unique_all`, `unique_counts`, `unique_inverse`, `unique_values` | Deferred | Extents are Runtime; no data-access use yet. |
 | `isin` | Deferred | Known shape, but no data-access use yet. |
@@ -153,20 +153,20 @@ the constants, operators, array attributes and the two extensions.
 
 | Class | Count |
 | --- | --- |
-| Direct | 79 |
+| Direct | 80 |
 | Compose | 9 |
 | Compose after New | 2 |
 | New | 11 |
-| Blocked | 6 |
+| Blocked | 5 |
 | Meta | 6 |
 | Runtime | 0 |
 | Deferred | 22 |
 | **Total** | **135** |
 
 Runtime applies to rules and array methods, not to any counted function: the
-data-dependent functions (`nonzero`, `unique_*`) are Deferred. 63 Direct rows are
-`Elementwise` variants. #32 specifies the first three; the rest each need the rules
-named in their group.
+data-dependent functions (`nonzero`, `unique_*`) are Deferred. 64 Direct rows are
+`Elementwise` variants. [elementwise.md](elementwise.md) specifies 32 of them; the
+rest each need the rules named in their group.
 
 ## Missing concepts, by data-access use case
 
