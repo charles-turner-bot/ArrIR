@@ -81,9 +81,10 @@ pub enum Collision {
 - Narrowing `float64` to `float32` needs `out_of_range` for finite values beyond the
   `float32` range. `Infinity` matches NumPy's `astype`, while `Clamp` gives the largest
   finite value. NaN stays NaN, and infinities stay infinite.
-- These float rules are proposed with [dtypes.md](dtypes.md); #38 reviews them. A
-  reduction whose `result` is narrower than its accumulator uses the same rules and
-  the same `OutOfRange` ([dtypes.md](dtypes.md#rules)).
+- These float rules were decided with [dtypes.md](dtypes.md) on 1 November; #38
+  reviews `Cast` as a whole. A reduction whose `result` is narrower than its
+  accumulator uses the same rules and the same `OutOfRange`
+  ([dtypes.md](dtypes.md#rules)).
 
 ## Effect on the schema
 
@@ -120,8 +121,12 @@ From Mike's reading of the GDAL source, still to be checked by fixtures:
 The GDAL adapter rejects any other combination.
 
 "Unverified" means nobody has yet checked which `OutOfRange` GDAL applies when it
-narrows to `float32`. The adapter still renders these rows, so a `Warp` with a `float32`
-output keeps working. The cell is settled by the meaning check in
+narrows to `float32`. Until someone does, the adapter rejects these rows (decided
+1 November, [dtypes.md](dtypes.md#decisions) question 9, under purity rule 4). So a
+`Cast` that narrows to `float32`, alone or after a `Warp`, is rejected for now. A
+`float32` output that needs no narrowing, such as a `Warp` of `float32` data, is
+unaffected. The cell is settled by the meaning check in
 [gdal-adapter.md](gdal-adapter.md#done-when), using a #42 fixture with values beyond
-the `float32` range. If GDAL clamps instead, the cell becomes `Clamp`, and plans asking
-for `Infinity` are rejected.
+the `float32` range. That fixture lifts the rejection: if GDAL overflows to infinity,
+the cell becomes `Infinity`; if it clamps, the cell becomes `Clamp`, and plans asking
+for `Infinity` stay rejected.

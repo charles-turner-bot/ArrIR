@@ -1,9 +1,8 @@
 # Symbolic shapes and broadcasting
 
-Status: proposal, 31 October 2026, for issue #29. Pending review. It builds on the
+Status: decided 1 November 2026, for issue #29 (proposed 31 October). It builds on the
 schema proposal ([#26](https://github.com/charles-turner-bot/ArrIR/pull/26)) and the
-DAG contract ([dag.md](dag.md), #45). Nothing here is implemented. The implementation
-is #2, after review.
+DAG contract ([dag.md](dag.md)). Nothing here is implemented yet; #2 implements it.
 
 ## What this decides
 
@@ -513,7 +512,7 @@ its own right, and a rewrite that swaps named operands needs it to keep their or
 
 ## Implementation through #2
 
-#2 implements this after review, in small PRs:
+#2 implements this in small PRs:
 
 1. `AxisName`, `Extent::Symbolic`, `SizeSymbol`, `MixedAxisNames` and
    `SymbolInDeclaredSchema`, with serde tests showing that a declared schema with a size
@@ -529,7 +528,10 @@ its own right, and a rewrite that swaps named operands needs it to keep their or
 
 None of these reads data, and the tests assert that.
 
-## Questions for review
+## Decisions
+
+Charles decided questions 2 and 10 directly, and accepted the recommendation on every
+other question on 1 November 2026.
 
 1. **One `Extent` enum or two types.** Adding `Symbolic` to #26's `Extent` keeps one
    schema type for declared and derived schemas. The risk is that a single serde enum
@@ -537,7 +539,7 @@ None of these reads data, and the tests assert that.
    `#[serde(skip)]` makes serialising it an error and makes it unreadable, on top of
    `SymbolInDeclaredSchema`. Two types (declared `Known | Unknown`, derived
    `Known | Symbolic`) make it a compile-time fact but duplicate `Schema`.
-   **Recommended: one enum with the serde guard.**
+   **Decided: one enum with the serde guard.**
 2. **(A) Names in broadcasting.** Decided by Charles, 1 November: see
    [Broadcasting](#broadcasting). A positional operand may not stretch a named length-1
    axis, with or without coordinates: one rule ("only positional axes stretch"), shape
@@ -545,21 +547,21 @@ None of these reads data, and the tests assert that.
    later without breaking a valid plan.
 3. **(B) Size-symbol identity.** By term structure (as written), so rewrites keep
    proofs, or by node, which is simpler but makes pushdown turn proven pairs into
-   unresolved ones. **Recommended: structure.**
+   unresolved ones. **Decided: structure.**
 4. **(C) Declared shared unknowns.** Should a host be able to say two `Open`s share an
-   unknown extent? **Recommended: no.** A host that knows they're equal usually knows the
+   unknown extent? **Decided: no.** A host that knows they're equal usually knows the
    value; if not, a requirement at the combining operation catches a mismatch.
 5. **Unresolved broadcasts.** Accept them with a requirement checked at its resolution
-   point, or reject them until the extents are known? **Recommended: accept.**
-6. **No solver.** Check each requirement on its own for now? **Recommended: yes.**
-7. **No Broadcast node,** with `broadcast_to` left to #41? **Recommended: yes.**
+   point, or reject them until the extents are known? **Decided: accept.**
+6. **No solver.** Check each requirement on its own for now? **Decided: yes.**
+7. **No Broadcast node,** with `broadcast_to` left to #41? **Decided: yes.**
 8. **Staggered offsets.** A `StaggerOffset` requirement (as written), or an offset term
    `s + delta` so an outer dimension's size symbol derives from its centre's?
-   **Recommended: the requirement,** until a rewrite needs to reason about offsets.
+   **Decided: the requirement,** until a rewrite needs to reason about offsets.
 9. **Value numbering for data-dependent terms.** Key `CountNonZero` and `LabelSelect`
    by value number (as written), so shared masks and path copies keep their size
    symbols, or by node, which is simpler but makes any rewrite near a mask or label
-   selection turn proven pairs into unresolved ones? **Recommended: value numbering.**
+   selection turn proven pairs into unresolved ones? **Decided: value numbering.**
 10. **Named outer broadcasting.** Decided by Charles, 1 November: named shapes align
     by name, so `a(x) + b(y)` gives `(x, y)` with no broadcast node and no
     `expand_dims`. A dim on one operand only is created on the other, not stretched.

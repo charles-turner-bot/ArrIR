@@ -2,8 +2,10 @@
 
 Status: agreed direction, amended 2026-10-27 (see
 [the 27 October discussion](2026-10-27-discussion.md)). The 28 October amendments are
-proposed (see [the 28 October discussion](2026-10-28-discussion.md)). Implementation
-proceeds in the small steps below.
+proposed (see [the 28 October discussion](2026-10-28-discussion.md)). The plan graph,
+shape and dtype amendments were decided on 1 November (see
+[the 31 October discussion](2026-10-31-discussion.md)). Implementation proceeds in the
+small steps below.
 
 ## Purpose
 
@@ -46,10 +48,10 @@ so that it agrees with the label rule below.
 
 ## Decisions
 
-- Start with linear unary chains, not a speculative graph.
-  *Proposed change, 31 October, pending review:* a plan is an append-only DAG of nodes
-  with ordered inputs and one root, as in [dag.md](dag.md). A chain is the special case,
-  so the first vertical slice keeps its content.
+- A plan is an append-only DAG of nodes with ordered inputs and one root, as in
+  [dag.md](dag.md). *Decided 1 November; this replaces the original "start with linear
+  unary chains" decision.* A chain is the special case, so the first vertical slice
+  keeps its content.
 - Extract xrexpr's **lowered** operations, not its fluent call recorder.
   `ContextOpen` belongs in host lowering; contextual reductions are semantic nodes.
 - Keep one semantic algebra. Rewrites consume it, not a competing optimiser IR.
@@ -57,11 +59,11 @@ so that it agrees with the label rule below.
   numerically relaxed rewrites require explicit permission. Strictness does not
   imply that unrelated execution engines already guarantee bitwise equality;
   adapters must expose or reject unsupported numerical requirements.
-  *Proposed, 31 October, pending review:* a reduction declares its order, either
+  *Decided 1 November:* a reduction declares its order, either
   `Sequential` (strict) or `Unspecified`, which is a relaxation that lowering writes
   explicitly. Rewrites that split or merge reductions need `Unspecified`
   ([dtypes.md](dtypes.md#order)).
-- *Proposed, 31 October, pending review:* ArrIR promotes dtypes implicitly only where
+- *Decided 1 November:* ArrIR promotes dtypes implicitly only where
   the conversion is exact, following Array API 2025.12. Every value-changing conversion
   is a `Cast` that lowering inserts, and a reduction states its accumulator, result and
   order ([dtypes.md](dtypes.md)).
@@ -78,10 +80,10 @@ Added on 27 October:
 
 - **A plan names its data by binding, not location.** External data enters a plan only
   through `Open { binding: BindingId, schema }`: a local name and the declared schema of
-  the dataset it binds. *Proposed with [dag.md](dag.md), pending review; this replaces
-  "every plan starts with `Open`", which is chain wording. Until dag.md's question 7 is
-  settled, `Warp`'s `GeometryBinding` is a second entry point. A literal scalar is a
-  zero-input node with no binding (proposed in #47, dtypes.md).* Mapping the binding to
+  the dataset it binds. *Decided with [dag.md](dag.md) on 1 November; this replaces
+  "every plan starts with `Open`", which is chain wording. `Warp`'s target geometry
+  becomes an `Open` input (dag.md question 7). A literal scalar is a zero-input
+  `Constant` node with no binding ([dtypes.md](dtypes.md)).* Mapping the binding to
   a URI, a byte-ref table or an in-memory array happens outside the plan. A plan
   therefore validates offline and never fetches anything when imported.
 - **`Open` binds a dataset, not one variable,** because the logical schema is
@@ -148,7 +150,7 @@ plan, but the table only describes what exists. A physical planner combines a lo
 plan with a storage layout to produce a physical plan.
 
 mdim-refs calls its placement layer "the plan". In ArrIR, *plan* always means the logical
-chain (a graph, if [dag.md](dag.md) is approved), and that layer is called *placements*.
+graph ([dag.md](dag.md)), and that layer is called *placements*.
 
 ### Dependency graph
 
@@ -192,8 +194,9 @@ not change the meaning of earlier ones.
 
 From #16, for positional semantics:
 
-- Dimensions are ordered. Order is part of the schema, and no operation in the current
-  vocabulary reorders it.
+- Dimensions are ordered. Order is part of the schema, and no operation reorders it
+  except as its documented output-order rule says. Name-based alignment is one such
+  rule: `a(x) + b(y, x)` gives `(x, y)` ([shapes.md](shapes.md)).
 - Positions are 0-based, and a negative position counts back from the end. Slices are
   half-open, with Python semantics. Adapters for hosts with other conventions translate
   them. R, for example, is 1-based and treats negative indices as exclusions.
@@ -202,7 +205,7 @@ From #16, for positional semantics:
   indexers.
 - A positional mask must match the dimension length exactly. There is no recycling.
 - Label selections have unknown extent until they are resolved. In derived shapes that
-  unknown is a size symbol with an identity (proposed in [shapes.md](shapes.md)).
+  unknown is a size symbol with an identity ([shapes.md](shapes.md)).
 - Broadcasting follows the 1 November decision [above](#decisions), detailed in
   [shapes.md](shapes.md#broadcasting).
 
@@ -249,7 +252,7 @@ rechunks: `merge_adjacent_selects`, `merge_adjacent_rechunks`, `pushdown_selects
 `pushdown_selects_past_rechunks`. Its four projection rules follow once projections
 exist. The fixpoint and its termination measure (no rule lengthens a plan or moves an
 operation rightwards) carry over with them. For a graph the measure needs restating
-(proposed in [dag.md](dag.md#rewrites-keep-old-ids-and-roots); deferred to #37).
+([dag.md](dag.md#rewrites-keep-old-ids-and-roots); deferred to #37).
 
 ## Implementation boundaries
 
@@ -280,13 +283,12 @@ do not omit a semantic field or its tests to satisfy the line count.
    reject anything outside that supported subset.
 6. Reduce and Select operation structs, each with its effects (purity rule 3; `Select`'s
    effects on grids are in [grids.md](grids.md#select-on-a-grid)), then the
-   linear plan starting with `Open` (a node arena if [dag.md](dag.md) is approved),
-   and structural validation, split into
+   plan as a node arena ([dag.md](dag.md)), and structural validation, split into
    independently understandable PRs. Footprints, the other half of rule 3, come later
    but before any physical planning. Until an operation has one, it can't be physically
    planned. `Warp` follows in its own PR, as in [warp.md](warp.md).
-7. Schema propagation along the chain (through the graph, if dag.md is approved), and
-   unknown-fact handling. Proposed, after the graph in step 6, in this order:
+7. Schema propagation through the graph, and unknown-fact handling. After the graph in
+   step 6, in this order:
    - symbolic shape inference: design #29 (`shapes.md`, #46), implementation #2;
    - dtype inference and reduction accumulation: design #30 (`dtypes.md`, #47),
      implementation #31;
