@@ -71,9 +71,9 @@ illustrative: design.md's extraction table lists `Open`, `Project`, `Select`, `R
 elementwise family. Operations hold their options; nodes hold the edges. A node's ID is
 its position, so it isn't stored in the node. Array data is never embedded: inputs are
 other nodes, and *external* data enters only through `Open`. `Warp`'s target geometry
-is an `Open` input too ([decision 7](#decisions)). A literal scalar, such as the `2` in
-`a * 2`, is a zero-input `Constant` node with no binding, defined in
-[dtypes.md](dtypes.md).
+is an input too, an `Open` or a computed dataset ([decision 7](#decisions)). A literal
+scalar, such as the `2` in `a * 2`, is a zero-input `Constant` node with no binding,
+defined in [dtypes.md](dtypes.md).
 
 **Who owns the nodes.** A `Graph` owns them. A rewrite takes `&mut Graph` and a root,
 appends to the graph in place, and returns a new root. No existing node is changed or
@@ -99,7 +99,8 @@ pairs the graph with the one root being exported or executed.
    ```
 
    `Open` is `Exactly(0)`, as is a `Constant` ([dtypes.md](dtypes.md)). `Warp` is
-   `Exactly(1)`, or `Exactly(2)` when its target geometry is an `Open` input. `Project`,
+   `Exactly(1)`, or `Exactly(2)` with a geometry input (an `Open` or a computed dataset),
+   when `target.coordinates` is non-empty ([warp.md](warp.md)). `Project`,
    `Cast` and
    an unweighted `Reduce` are `Exactly(1)`; a weighted `Reduce` is `Exactly(2)`, its
    weights being the second input. A `Select` takes one input plus one per array-valued

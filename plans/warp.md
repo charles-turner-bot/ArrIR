@@ -1,7 +1,12 @@
 # Warp
 
-Status: proposal. Part of [the extraction contract](design.md), building on
-[grids.md](grids.md). The reasoning is in [the 28 October discussion](2026-10-28-discussion.md).
+Status: decided 1 November 2026, after review (see
+[the 1 November discussion](2026-11-01-discussion.md#warp-and-gdal-adapter)). Part of
+[the extraction contract](design.md). It follows the decided [dag.md](dag.md),
+[schema-and-values.md](schema-and-values.md) and [cast.md](cast.md). Its grid concepts
+(models, placements, `PixelInterpretation`, Select on a grid) come from
+[grids.md](grids.md). The earlier reasoning is in
+[the 28 October discussion](2026-10-28-discussion.md).
 
 ## Summary
 
@@ -26,7 +31,7 @@ pub struct Warp {
     /// The variables to warp, each with its own method. Variables on `source_grid`
     /// that aren't listed stay where they are.
     pub variables: Vec<WarpVariable>,
-    pub geometry: GeometryRules,
+    pub cells: CellRules,
 }
 
 pub struct WarpVariable {
@@ -39,36 +44,45 @@ pub struct WarpVariable {
 
 /// How cells are shaped, and how exactly coordinates are transformed. These apply to
 /// every variable in the warp, because they describe the grids, not the values.
-pub struct GeometryRules {
+pub struct CellRules {
     /// How to find cell edges on a grid that has no bounds.
     pub edges: EdgeRule,
-    /// The shape of a cell's sides between its corners.
+    /// The shape of a cell's sides between its corners, on both grids.
     pub edge_shape: EdgeShape,
-    /// Largest permitted error, in target cells, of an approximate coordinate
-    /// transformer. 0 means exact. gdalwarp defaults to 0.125, so it's never implicit.
+    /// Largest permitted error of an approximate coordinate transformer, measured in
+    /// source cells (distance in the source grid's index space). 0 means exact. A
+    /// value above 0 is a permission to approximate, not a bound any engine promises.
     pub error_threshold: f64,
 }
 
 pub struct WarpTarget {
     /// The output grid. Its ID and coordinate names are new to the output schema. A
     /// dimension name already used elsewhere in the plan names the same axis
-    /// (`plans/dag.md`, "ID scope across Opens").
+    /// ([dag.md](dag.md), "ID scope across Opens").
     pub grid: Grid,
     /// The size of each of the target grid's dimensions.
     pub sizes: Vec<(DimId, u64)>,
-    /// Where the target's coordinate variables come from, when its model refers to
-    /// any: a rectilinear or curvilinear grid, a mesh, or a DGGS cell list. An
-    /// affine target needs none. Decided 1 November (dag.md decision 7): this
-    /// becomes an `Open` input to `Warp` when Warp is implemented, rather than a field.
-    pub geometry: Option<GeometryBinding>,
+    /// For each coordinate variable the target grid's model names, the variable of
+    /// the geometry input that supplies it. Empty for an affine target.
+    pub coordinates: Vec<TargetCoordinate>,
 }
 
-/// Declared like `Open`: a local name and the schema it must have.
-pub struct GeometryBinding {
-    pub binding: BindingId,
-    pub schema: Schema,
+/// One target coordinate, taken from the geometry input (`Warp`'s second input).
+pub struct TargetCoordinate {
+    /// The name the coordinate has in the output schema, as the target model names it.
+    pub output: VarId,
+    /// The variable in the geometry input's schema that holds its values.
+    pub from_input: VarId,
 }
 ```
+
+`Warp`'s inputs are the source dataset, then, when the target's model names coordinate
+variables, the geometry input (dag.md decision 7). Arity is `Exactly(2)` when
+`target.coordinates` is non-empty and `Exactly(1)` otherwise. The geometry input is any
+node with a `Dataset` result: an `Open`, or a computed dataset.
+
+`Warp` takes a `Dataset` input and gives a `Dataset` output. A single variable is
+selected afterwards with `Project`.
 
 ### Why each variable has its own method
 
@@ -93,29 +107,36 @@ call, as gdalwarp does, emits a `Warp` followed by a `Cast` as one call.
 
 `empty_value` is chosen so that no valid result can equal it:
 
-- for `Nearest` and `Mode`, it is NaN or one of the source variable's declared missing
-  values, which no copied value can be;
+- for `Nearest` and `Mode`, it is NaN for a float variable, or one of the variable's
+  declared sentinels;
 - for `Interpolate` and `Conservative`, it is NaN.
 
-So `Warp` never writes a valid value that reads as missing. Choosing which value marks
-an empty cell in an integer output, and what happens when a converted value collides
-with it, is `Cast`'s job.
+Every warped float variable must have `nan_is_missing: true` (decision 3). Without it
+NaN would be a valid value: `Nearest` would copy it, and the output, which marks empty
+cells with NaN, would then read it as missing. With it, NaN is never a contributor, and
+the one NaN a warp can produce from valid data, `+inf` and `-inf` meeting with non-zero
+weight, reads as missing. That is stated, not silent.
 
-### Why the target geometry has a schema
+An integer variable with no sentinel (`Known { values: [], nan_is_missing: false }`)
+has no legal `empty_value` for `Nearest` or `Mode`, and a `Cast` can't add one, since a
+same-dtype cast has no node. Such a warp is rejected (decision 5). A `bool` variable
+can't be warped at all for now: it has no missing values
+([cast.md](cast.md#missing-values)) and isn't float, so no method has a legal
+`empty_value`.
+
+Choosing which value marks an empty cell after a later conversion to an integer type,
+and what happens when a converted value collides with it, is `Cast`'s job.
+
+### Why the target geometry is an input
 
 A regular target is a few numbers: a CRS, a transform and two sizes. Those fit in the
 plan. Other targets are data. A tripolar ocean grid is its `geolon(j, i)` and
 `geolat(j, i)` arrays, and a mesh is its node coordinates and connectivity. The plan
-can't contain data (purity rule 1), so these targets arrive as a binding that the host
-fills, as a source does through `Open`. Without this, `Warp` could only reach the
-regular grids gdalwarp writes.
-
-A bare binding is only a name, so validation couldn't check the warp or derive its
-output schema offline. `GeometryBinding` therefore declares what the bound dataset
-will contain: for example, `geolon` and `geolat` on `(yh, xh)`, 1080 × 1440, placed at
-`(Centre, Centre)` on the target grid. Validation checks the plan against that
-declaration. When the host resolves the binding, it checks the real dataset against
-it and fails if they differ, exactly as for `Open`.
+can't contain data (purity rule 1), so these arrive as an input node, usually an
+`Open` that the host binds. The `Open`'s declared schema is what validation checks the
+warp against, and the host checks the bound dataset against that schema, as for any
+`Open`. A computed geometry, such as a `Select` of another model's grid, is an ordinary
+node and needs nothing extra.
 
 ## Resampling
 
@@ -135,7 +156,14 @@ pub struct InterpolateOptions {
     pub scaling: KernelScaling,
 }
 
-pub enum Kernel { Bilinear, Cubic, CubicSpline, Lanczos }
+pub enum Kernel {
+    /// Tent: w(x) = 1 - |x| for |x| < 1. Radius 1.
+    Bilinear,
+    /// Keys' cubic convolution with a = -0.5. Radius 2.
+    Cubic,
+    /// w(x) = sinc(x) sinc(x / 3), with sinc(x) = sin(πx) / (πx). Radius 3.
+    Lanczos,
+}
 
 pub enum KernelScaling {
     /// Evaluate the kernel at the target point, as scipy and xESMF's bilinear do.
@@ -169,11 +197,17 @@ pub enum AreaMeasure {
 
 pub enum EdgeRule {
     /// Use the grid's bounds: by arithmetic for `Affine`, or its `Outer` coordinates.
-    /// A grid without bounds is invalid for a method that needs edges.
+    /// CF bounds variables never count; they stay ordinary auxiliary coordinates
+    /// ([grids.md](grids.md#decisions)). A grid without bounds is invalid for a
+    /// method that needs edges. After a `Select` with `|k| > 1`, a curvilinear grid
+    /// keeps only its `Centre` entry ([grids.md](grids.md#staggered-dimensions)), so
+    /// it has no `Outer` bounds and needs `MidpointsBetweenCentres`.
     FromBounds,
     /// Derive corners from centres, in the coordinates' own CRS: a corner is the mean
-    /// of the four centres around it, and the outer corners extrapolate linearly. This
-    /// extrapolates, so it is only ever used when stated.
+    /// of the four centres around it, and the outer corners extrapolate linearly. In a
+    /// geographic CRS, each longitude is first shifted by a multiple of 360° to within
+    /// 180° of the first of the four. This extrapolates, so it is only ever used when
+    /// stated.
     MidpointsBetweenCentres,
 }
 
@@ -187,41 +221,49 @@ pub enum EdgeShape {
 }
 ```
 
-Definitions, all proposed:
+Definitions:
 
-- **Every method** first transforms target locations into the source grid's CRS. It
-  excludes source values that the source variable declares missing (see
-  [Missing values](#missing-values)). A target cell with no remaining contributors gets
-  that variable's `empty_value`.
-- **Cell edges** come from `geometry.edges`, and the sides between corners have the
-  shape `geometry.edge_shape`. `Nearest`, `Mode` and `Conservative` need them, on the
-  source, the target, or both. `Interpolate` needs only centres.
+- **Every method** first transforms target locations into the source grid's CRS:
+  target centres for `Nearest` and `Interpolate`, target cells for `Mode` and
+  `Conservative`. It excludes source values that the source variable declares missing
+  ([schema-and-values.md](schema-and-values.md#missing-values-and-decoding)). A target
+  cell with no remaining contributors gets that variable's `empty_value`.
+- **Cell edges** come from `cells.edges`, and the sides between corners have the shape
+  `cells.edge_shape`. `Nearest`, `Mode` and `Conservative` need them, on the source,
+  the target, or both. `Interpolate` needs only centres.
 - **`Nearest`:** the value of the source cell that contains the target cell's centre.
-  Cells are half-open, so a point on a shared edge belongs to the cell that starts
-  there. On a mesh, "contains" means the face containing the point. On a DGGS, it means
-  the cell containing it.
-- **`Interpolate`:** the kernel's weighted sum of source cell centres around the
-  target centre. With `Widen`, a source centre `d` cells away on the column axis gets
+  Cells are half-open in the source grid's index space, so a point on a shared edge
+  belongs to the cell that starts there (GDAL's floor agrees: a centre exactly on an
+  edge picked the higher cell). On a `PixelInterpretation::Point` grid a cell is the
+  box centred on its sample, so `Nearest` picks the nearest sample, ties going to the
+  higher index. On a mesh, "contains" means the face containing the point. On a DGGS,
+  it means the cell containing it.
+- **`Interpolate`:** `Σ w·v / Σ w` over the contributors: source cells inside the
+  source grid, not missing, and with `w ≠ 0`, where `w` is the product of the
+  kernel's weights on the column and row axes at the distance, in source cells, from
+  the target centre. Near missing values and the source's edges this renormalises over
+  what remains. With `Widen`, a source centre `d` cells away on the column axis gets
   the kernel's weight at `d * column`, and the kernel's radius is divided by `column`;
-  the row axis is the same. The plan computes the factors from the two grids, with no
-  data read, and states them. It's defined only between `Horizontal` grids for now. On
-  other kinds it's invalid.
+  the row axis is the same. The factors are free values that lowering states;
+  validation checks only that each is in (0, 1]. It's defined only between
+  `Horizontal` grids for now. On other kinds it's invalid.
 - **`Mode`:** the most common value among source cells that overlap the target cell.
   Each cell counts once, whatever its overlap. When several values are equally common,
-  `ties` picks the smallest or the largest. NaN never wins, since it's always either
-  missing or excluded.
+  `ties` picks the smallest or the largest. NaN is never a candidate, since warped
+  float variables treat NaN as missing.
 - **`Conservative`:** the overlap-area-weighted mean of the source cells that overlap
   the target cell, with areas measured as `area` says. This is first-order conservative
-  remapping, the method xESMF and ESMF call `conservative`. Both grids must be
-  `PixelInterpretation::Area`, or meshes or DGGS cells.
+  remapping, the method xESMF and ESMF call `conservative`.
+- **`Mode` and `Conservative`** need `PixelInterpretation::Area` on both grids, or
+  meshes or DGGS cells. `Nearest` and `Interpolate` accept `Area` and `Point`.
 
 **A source cell with zero weight contributes nothing** to `Interpolate` or
 `Conservative`. It is left out of the sum, not added as `0 × value`. So a target centre
 that falls exactly on a source centre returns that source value, and an infinite source
 value never reaches a cell where its weight is zero: `0 × inf` would be NaN. Infinities
 with non-zero weight follow IEEE 754. One infinity makes the result that infinity, and
-`+inf` together with `-inf` gives NaN. gdalwarp breaks this rule with a `Float32`
-working type ([gdal-adapter.md](gdal-adapter.md#how-it-emits-a-warp)).
+`+inf` together with `-inf` gives NaN, which reads as missing. gdalwarp breaks this rule
+with a `Float32` working type ([gdal-adapter.md](gdal-adapter.md#how-it-emits-a-warp)).
 
 `EdgeRule` exists because of the most common GDAL case: a swath with centre coordinates
 only. gdalwarp implies edges between centres. Making `Nearest` invalid without bounds
@@ -232,54 +274,36 @@ says which it wants. Mike's tests show gdalwarp's geolocation inversion matches
 
 **The edge shape is a grid rule, not a `Conservative` option.** Mike suggested splitting
 `Spherical` into an area measure and an edge shape, because "spherical" also implied
-great-circle sides. The split is kept, but `edge_shape` sits in `GeometryRules`. Which
-source cell contains a point, for `Nearest`, or overlaps a cell, for `Mode`, depends on
-the cells' sides as much as `Conservative`'s areas do.
+great-circle sides. The split is kept, and `edge_shape` sits in `CellRules`
+(decision 1). Which source cell contains a point, for `Nearest`, or overlaps a cell,
+for `Mode`, depends on the cells' sides as much as `Conservative`'s areas do.
 
 **The kernel scale is in the plan.** gdalwarp estimates its own widening factor, and
 the estimate changes from one processing chunk to the next, so its output depends on
-the warp memory setting (osgeo-upstream#50). A stated factor gives every engine the
-same kernel.
+the warp memory setting
+([mdsumner/osgeo-upstream#50](https://github.com/mdsumner/osgeo-upstream/issues/50)). A
+stated factor gives every engine the same kernel.
 
 There's no `Average`. GDAL's `average` differs from `Conservative` (see question 2), so
-it isn't an alias. New methods are added one at a time, each with a definition.
+it isn't an alias. There's no `CubicSpline`: GDAL's is an approximating B-spline that
+still returns the source value on an exactly aligned target, so it isn't one kernel
+(decision 7). New methods are added one at a time, each with a definition.
 
 ## Missing values
 
-Which source values count as missing has to be declared. Validation reads no data, so
-it can't find out. This proposes a field on each variable in the logical schema, in
-`arrir-types`:
+`MissingValues` is defined in
+[schema-and-values.md](schema-and-values.md#missing-values-and-decoding). The schema
+describes the values operations receive, and the first subset accepts already-logical
+bindings only, so sentinels are compared with logical values. Warp adds:
 
-```rust
-pub enum MissingValues {
-    Known {
-        /// Values that mean "missing": CF's _FillValue and missing_value, or GDAL's nodata.
-        values: Vec<Scalar>,
-        /// Whether NaN counts as missing. xarray treats it as missing. GDAL does so only
-        /// when nodata is NaN. So it's declared, never assumed.
-        nan_is_missing: bool,
-    },
-    /// Not known. An operation whose result depends on missing values is invalid.
-    Unknown,
-}
-```
-
-- **It lives in the logical schema, not the layout.** `arrir` can't depend on
-  `arrir-layout`. The layout's `fill` and the CF attributes become this field when
-  `arrir-layout` produces a `Schema` for the logical side. The layout's `fill` doesn't
-  count as missing: it says what unwritten elements read as, not that the value means
-  missing (question 5).
-- **Missing values are stated in the type they're compared with.** CF's are in the
-  packed type, before `scale_factor` and `add_offset`. So they're compared with stored
-  values, and a later decoding step has to carry them through. How the schema
-  represents packed variables isn't designed yet.
-- **`Reduce` needs it too.** `skipna` means "skip the values this field declares
-  missing". So the field belongs with the schema work in roadmap step 3, not with
-  `Warp` alone.
+- **Every listed variable's missing values are `Known`,** and a float variable's have
+  `nan_is_missing: true` (see [Output type and empty cells](#output-type-and-empty-cells)).
 - **`empty_value` is always required.** Whether a target cell ends up empty depends
   on the data, and on the geometry: a target cell outside the source's extent has no
   contributors. Neither can be checked offline. So every warped variable says what to
   write in an empty cell.
+- **The layout's `fill` doesn't count as missing.** It says what unwritten elements
+  read as, not that the value means missing (question 5).
 
 Valid ranges (CF's `valid_min`, `valid_max` and `valid_range`) aren't covered yet.
 
@@ -289,26 +313,49 @@ Valid ranges (CF's `valid_min`, `valid_max` and `valid_range`) aren't covered ye
   inserted where the first of the old ones was. A `(time, row, column)` variable warped
   to a mesh becomes `(time, face)`. Its data type becomes the method's output type. Its
   missing values become `Known { values: [], nan_is_missing: true }` when
-  `empty_value` is NaN, and `Known { values: [empty_value], nan_is_missing: false }`
-  otherwise.
+  `empty_value` is NaN, `Known { values: [empty_value], nan_is_missing: true }` for a
+  float variable with a sentinel `empty_value`, and
+  `Known { values: [empty_value], nan_is_missing: false }` for an integer one. A float
+  output keeps `nan_is_missing: true`, so it can be warped again (decision 3).
 - The target grid enters the schema, with its coordinate variables from the model or
-  from `target.geometry`. Warped variables are placed on it, at its primary location:
-  `Centre` on both axes for `Horizontal`, a face for `Mesh`, a cell for `Dggs`.
+  from the geometry input, as `target.coordinates` says. Only the listed coordinates
+  are taken from that input. Warped variables are placed on the target grid at its
+  primary location: `Centre` on both axes for `Horizontal`, a face for `Mesh`, a cell
+  for `Dggs`.
+- The target grid's rectilinear or curvilinear coordinates have no origin
+  ([elementwise.md](elementwise.md)), so such a grid equals no other grid, even one
+  from another warp to the same target ([grids.md](grids.md#grid-equality)). An
+  `Affine` target compares by its definition.
 - Variables on `source_grid` that aren't listed stay where they are. The source grid and
-  its coordinate variables are dropped once no data variable is placed on it. A target
-  that reuses the source grid's names requires this (see [Validation](#validation)).
+  its coordinate variables are dropped once no data variable is placed on it, by
+  grids.md's general rule that a grid with no data variable placed on it is removed
+  ([grids.md](grids.md#decisions), decision C). A target that reuses the source grid's
+  names requires this (see [Validation](#validation)).
+- When the source grid is dropped, any other variable that spans one of its dimensions
+  (an `area(y, x)` or `mask(y, x)` coordinate outside the grid model) is not dropped
+  silently: the warp is rejected, and lowering removes such variables with `Project`
+  first (decision 9).
 
 ## Validation
 
+- The input is a `Dataset` with known dtypes for every listed variable; an unknown
+  dtype is a readiness requirement, not an error.
 - Every listed variable is placed on `source_grid`, at its primary location. Warping a
   staggered variable would shift it by half a cell without saying so. Moving it to the
-  primary location first is a separate operation, not yet designed.
+  primary location first is a separate operation, not yet designed, and is rejected
+  for now.
 - No variable is listed twice.
-- Every listed variable's missing values are `Known`.
-- Each `empty_value` has the method's output type, and is NaN or a declared missing
-  value as above.
-- `Widen` factors are in (0, 1].
+- Every listed variable's missing values are `Known`, with `nan_is_missing: true` for
+  a float variable.
+- Each `empty_value` has the method's output type, and is NaN or a declared sentinel
+  as above. An integer variable with no sentinel can't be warped with `Nearest` or
+  `Mode`.
+- No listed variable is `bool`
+  (see [Output type and empty cells](#output-type-and-empty-cells)).
+- `Widen` factors are in (0, 1]. `error_threshold` is finite and ≥ 0.
+- `Mode` and `Conservative` need `PixelInterpretation::Area` on both grids.
 - Both grids have a spatial reference: a `crs`, or a DGGS system.
+- Both grids are `Horizontal` for now. `Structured` grids are rejected.
 - The target's grid ID, dimension names and coordinate names don't collide with any
   already in the schema, with one exception. The target may reuse the source grid's
   dimension and coordinate names when the warp empties the source grid: every data
@@ -319,14 +366,26 @@ Valid ranges (CF's `valid_min`, `valid_max` and `valid_range`) aren't covered ye
   axes as `model`'s. If any variable stays on the source grid, the names would name two
   grids' axes in one schema, so the warp is rejected; warp the remaining variables too,
   or `Rename` first.
-- `sizes` gives exactly the target grid's dimensions, once each.
-- **`target.geometry`:**
-  - It is set exactly when the target's model refers to coordinate variables.
-  - Its schema contains each one, as a numeric coordinate placed on the target grid at
-    the right position, spanning dimensions whose sizes match `sizes`.
-- A method that needs edges has them, from bounds or from `geometry.edges`.
-- When the source grid is the result of an unresolved label selection, the warp can't be
-  validated until the label is resolved (see [grids.md](grids.md#select-on-a-grid)).
+- `sizes` gives exactly the target grid's dimensions, once each, including any
+  staggered dimension its model's entries use (an `Outer` dimension has `N + 1`
+  points).
+- An `Affine` target declares `IndexMap { offset: 0, step: 1 }` on both axes, as any
+  newly declared grid does ([grids.md](grids.md#grid-models)).
+- **The geometry input:**
+  - It is present exactly when `target.coordinates` is non-empty, and
+    `target.coordinates` lists exactly the coordinate variables the target model names.
+  - It is a `Dataset` that has every `from_input` variable, each numeric with a known
+    dtype.
+  - Each such variable has the dimensions its model entry's placement implies, by
+    `DimId`, with `Known` extents equal to `sizes`: both centre dimensions for a
+    curvilinear `Centre` entry, one axis's dimension for a rectilinear coordinate, and
+    the staggered dimensions for an `Outer` (bounds) entry. `VarId`s are per node, so
+    only the `output` names enter the output schema, and they follow the collision
+    rule above.
+- A method that needs edges has them, from bounds or from `cells.edges`.
+- When the source's placements are `Unresolved`, because a label on one of the grid's
+  dimensions removed the grid ([grids.md](grids.md#decisions), decision D), the warp
+  can't be validated until the label is resolved.
 
 ## Footprint
 
@@ -354,10 +413,15 @@ any other that emits `Warp`.
 - **Spherical fixtures** use cells whose areas are known exactly, such as octants of
   the sphere.
 - **Each method gets cases for:**
-  - missing source values;
+  - missing source values, including a missing value in the cell that contains the
+    target centre;
   - a target cell outside the source;
-  - a tie for `Mode`;
-  - integer output with rounding and out-of-range values.
+  - sources one cell tall or one cell wide;
+  - NaN and infinite neighbours with zero weight;
+  - per-variable missing values in a warp of several variables;
+  - a tie for `Mode`.
+- **Integer output with rounding and out-of-range values** is a `Warp` followed by a
+  `Cast`, since `Warp` never rounds. Those cases belong to #42's Warp→Cast set.
 - **Each fixture states its tolerance.** `Nearest` and `Mode` are exact. The contract
   doesn't assume bitwise agreement between engines, so the others state a bound.
 - **Conservative fixtures that can't be worked by hand** come from ESMF and
@@ -378,16 +442,16 @@ what ArrIR means.
 | Warp to and from meshes | uxarray's remapping |
 | Warp to and from DGGS | xdggs; healpy |
 
-## Questions for Mike
+## Answers from Mike
 
-Questions 1 to 5 are answered, from GDAL's source and from tests in rwarp
-(hypertidy/rwarp#2 and #3). The GDAL adapter's rules that follow from them are in
-[gdal-adapter.md](gdal-adapter.md).
+Answered from GDAL's source and from tests in rwarp (hypertidy/rwarp#2 and #3). The
+GDAL adapter's rules that follow from them are in [gdal-adapter.md](gdal-adapter.md).
 
 1. **Mode ties.** gdalwarp keeps the value that reached the winning count first, in
    scan order, unless `MODE_TIES=MIN` or `MAX` is set (GDAL 3.11 and later). Scan order
    depends on the source's orientation, so it isn't adopted as a `ModeTie`. `MIN` and
-   `MAX` are only reliable for 8- and 16-bit working types (osgeo-upstream#51).
+   `MAX` are only reliable for 8- and 16-bit working types
+   ([mdsumner/osgeo-upstream#51](https://github.com/mdsumner/osgeo-upstream/issues/51)).
 2. **`average`.** It renormalises over valid pixels, but it isn't `Conservative`. It
    measures overlap in source pixel space, against a box built from two corners of the
    target cell, and overweights edge pixels when the box overhangs the source. It
@@ -395,30 +459,42 @@ Questions 1 to 5 are answered, from GDAL's source and from tests in rwarp
    only for axis-aligned grids in one CRS, away from the edges.
 3. **Kernel widening.** `XSCALE=1` and `YSCALE=1` turn it off. Bilinear and cubic only
    widen once the factor is 0.5 or less. The automatic factor varies between chunks
-   (osgeo-upstream#50), which is why the plan states it.
+   ([mdsumner/osgeo-upstream#50](https://github.com/mdsumner/osgeo-upstream/issues/50)),
+   which is why the plan states it.
 4. **Rounding.** With an integer working type, gdalwarp clamps, then rounds an
    interpolating kernel's result half up (`Rounding::NearestTiesUp`), but it converts
    the source into the working type rounding half away from zero. With a float working
    type, it converts at the end, rounding half away from zero, with NaN becoming 0. A
    result equal to the nodata value is moved off it, which on the float path can be
-   undone by the rounding. These rules are what [`Cast`](cast.md) has to express; the
-   rounding rules were checked with GDAL 3.13.3 on 1 November
+   undone by the rounding. These rules are what [`Cast`](cast.md) has to express; they
+   were checked with GDAL 3.13.3 on 1 November
    ([cast.md](cast.md#what-gdalwarp-can-emit)).
 5. **The layout's `fill`.** It doesn't count as missing. See
    [Missing values](#missing-values).
 
-Question for Mike:
+## Decisions
 
-6. `edge_shape` sits in `GeometryRules`, applying to every method, rather than in the
-   `Conservative` options as suggested. Does that fit rwarp's front ends?
+Decided 1 November 2026, taking the review's recommendations (Charles's standing rule
+of accepting conservative ones):
 
-## Not settled
-
-- An operation that moves a staggered variable to its grid's primary location.
-- Second-order conservative remapping, and patch recovery.
-- Warp's effect on `Structured` grids.
-- Warp's footprint, and how `arrir-physical` computes it.
-- One `edge_shape` for both grids. Each grid's own shape may need stating when they
-  differ in a way `StraightInIndex` doesn't cover.
-- Packed variables (`scale_factor`, `add_offset`) and how decoding carries missing
-  values.
+1. **`edge_shape` stays in `CellRules`,** applying to every method, because `Nearest`
+   and `Mode` containment depend on it. One shape applies to both grids; grids whose
+   own shapes differ can't be stated and are rejected.
+2. **`Mode` counts each cell once,** whatever its overlap. The GDAL adapter rejects
+   `Mode`, since GDAL weights by overlap.
+3. **Warped float variables have `nan_is_missing: true`,** and a NaN computed from
+   infinities reads as missing. A warp's float output keeps `nan_is_missing: true`.
+4. **`error_threshold` is in source cells,** and a value above 0 is a permission to
+   approximate, not a bound.
+5. **Integer variables with no sentinel** can't be warped with `Nearest` or `Mode`, and
+   `bool` variables can't be warped at all, since neither has a legal `empty_value`.
+6. **`Interpolate` renormalises** over contributors that are inside the source, not
+   missing, and have non-zero weight.
+7. **`CubicSpline` is removed.** `Cubic` is Keys with a = -0.5, `Lanczos` has radius 3.
+8. **Result kinds:** `Dataset` in and out; `Project` selects a variable afterwards.
+9. **Other variables on a dropped source grid's dimensions** reject the warp rather
+   than being dropped silently.
+10. **Not yet:** an operation moving a staggered variable to its grid's primary location
+    (rejected now), `Structured` grids (rejected), packed variables (rejected, since the
+    first subset accepts logical bindings only), second-order conservative remapping
+    and patch recovery (deferred), and Warp's footprint (deferred; GDAL doesn't need it).

@@ -10,14 +10,15 @@ This directory preserves the reasoning behind ArrIR, not just a list of features
   the byterefs specification.
 - [Grids, CRS and staggering](grids.md): proposed. How the schema represents spatial
   grids, the first step towards lowering plans to GDAL.
-- [Warp](warp.md): proposed. Reprojection and regridding between grids, with
+- [Warp](warp.md): decided. Reprojection and regridding between grids, with
   resampling defined independently of any engine.
 - [Cast](cast.md): decided, revised by #38. Type conversion with rounding,
   out-of-range handling and missing values stated, compared against Array API, NumPy,
   xarray and GDAL.
 - [Dtypes](dtypes.md): decided. Promotion, Python scalars and reduction accumulators,
   with every value-changing conversion an explicit `Cast`.
-- [GDAL adapter](gdal-adapter.md): proposed. Rendering plans as GDAL VRT text.
+- [GDAL adapter](gdal-adapter.md): decided, except curvilinear targets. Rendering
+  plans as GDAL VRT text, and what GDAL computes differently.
 - [Plans as DAGs](dag.md): decided. Nodes with ordered inputs, stable IDs and one
   root, replacing linear unary chains.
 - [Symbolic shapes](shapes.md): decided. Named and positional axes, known, symbolic
@@ -42,7 +43,8 @@ This directory preserves the reasoning behind ArrIR, not just a list of features
   the 1 November decisions on the graph, shapes and dtypes.
 - [1 November 2026 discussion](2026-11-01-discussion.md): the second design round,
   including the decided schema, Select, the `Cast` review against Array API `astype`,
-  NumPy, xarray and GDAL, and the elementwise family.
+  NumPy, xarray and GDAL, the elementwise family, and the Warp and GDAL adapter
+  review.
 
 Update these notes when a decision changes, stating what changed and why.
 Distinguish proposed designs from implemented behaviour. Passing type/unit tests

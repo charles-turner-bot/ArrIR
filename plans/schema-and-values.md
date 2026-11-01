@@ -176,9 +176,25 @@ barrier, but it must not rename an unsupported type `Unknown` to export it.
 
 ## Missing values and decoding
 
-Use `MissingValues::Known { values, nan_is_missing } | Unknown` from
-[warp.md](warp.md#missing-values). `Known { values: [], nan_is_missing: false }`
-means no values are missing. It is not interchangeable with `Unknown`.
+This is the home of `MissingValues` (it moved here from warp.md on 1 November):
+
+```rust
+pub enum MissingValues {
+    Known {
+        /// Values that mean "missing": CF's _FillValue and missing_value, or GDAL's
+        /// nodata, in the variable's logical dtype. Never NaN.
+        values: Vec<Scalar>,
+        /// Whether NaN counts as missing. xarray treats it as missing; GDAL does so
+        /// only when nodata is NaN. So it is declared, never assumed.
+        nan_is_missing: bool,
+    },
+    /// Not known. An operation whose result depends on missing values is invalid.
+    Unknown,
+}
+```
+
+`Known { values: [], nan_is_missing: false }` means no values are missing. It is not
+interchangeable with `Unknown`.
 Sentinels must be representable in the variable's logical dtype; their numeric
 comparison rules are explicit. **`values` may not contain a NaN:** NaN is missing only
 through `nan_is_missing`, so validation rejects a NaN sentinel rather than leave it
