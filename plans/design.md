@@ -281,7 +281,7 @@ do not omit a semantic field or its tests to satisfy the line count.
    pixel interpretation, and staggered placements, as in [grids.md](grids.md).
 4. Positional indexer values, then label/advanced-index and binding values in
    separate PRs. Preserve source distinctions used by rewrite proofs. Indexing modes
-   and computed indexers are proposed in [select.md](select.md).
+   and computed indexers are decided in [select.md](select.md).
 5. A deliberately bounded reduction specification with explicit result options;
    reject anything outside that supported subset.
 6. Reduce and Select operation structs, each with its effects (purity rule 3; `Select`'s

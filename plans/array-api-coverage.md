@@ -48,7 +48,7 @@ symbolic extent ([shapes.md](shapes.md)).
 | Type promotion, scalar arguments | Meta | Decided in [dtypes.md](dtypes.md) (for #30); to be implemented in #31. Mixed kinds are rejected (`MixedKind`, its question 1, decided 1 November). Python scalars become `Constant` nodes. |
 | Data types | Meta | Bool, int8–64, uint8–64, float32/64 are in #26's `DType`. complex64/128 are **required** by the spec but deferred in #26 and dtypes.md. |
 | Basic indexing (int, slice, ellipsis) | Direct | `Select` positional indexers, #3; conventions in [design.md](design.md#conventions). |
-| Integer-array indexing | Direct | `Select` in pointwise mode ([select.md](select.md), proposed for #36). Slices mixed with integer arrays are unspecified by the spec; reject. |
+| Integer-array indexing | Direct | `Select` in pointwise mode ([select.md](select.md), decided for #36). Slices mixed with integer arrays are unspecified by the spec; reject. |
 | Boolean-array indexing | Runtime | #36; the extent is a symbol for the true count (a `CountNonZero` size term in #36 and shapes.md). A literal mask has a known count (#3). One-dimensional masks only; multi-dimensional masks wait for a traversal-order contract ([select.md](select.md)). |
 | Data-dependent output shapes | Runtime | Symbolic extents (#29/shapes.md, #36). The spec lets libraries omit these; adapters advertise this as a capability. |
 | Copies, views, mutation | Deferred | Plans are values, and the proposed node arena is append-only (dag.md). `copy=` and in-place operators are adapter concerns. |
