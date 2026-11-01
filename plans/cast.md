@@ -115,7 +115,7 @@ a row says verified:
 | --- | --- | --- | --- |
 | gdalwarp, integer working type (`-wt` set to the output type) | `NearestTiesUp` | `Clamp` | `Nudge` |
 | gdalwarp, float working type, integer output | `NearestTiesAway` | `Clamp` | `Keep` (the nudge is undone by rounding) |
-| gdalwarp, float working type no narrower than the source, float output | none needed | `Infinity` (verified) | `Nudge` |
+| gdalwarp, float working type (`Float64` unless `Nearest`), float output | none needed | `Infinity` (verified) | `Nudge` |
 | ordinary conversion (a `Cast` with no warp), integer output | `NearestTiesAway` | `Clamp` | `Keep` |
 | ordinary conversion, float output | none needed | none: clamps infinities too, so rejected | `Keep` |
 
@@ -132,9 +132,10 @@ bindings) and NumPy 2.5.4, narrowing a `float64` raster to `Float32`:
 - **gdalwarp with `-wt Float32` and an interpolating resampler** (`bilinear`, `cubic`):
   the narrowing itself is still `Infinity`, but a finite neighbour of a value that is
   infinite in the working type becomes NaN. In `[1, 2, 1e39, 4, 5, inf, 7, 8]`, the `2`
-  and the `5` come out as NaN. With `-wt Float64` the neighbours are unchanged. So the
-  adapter never sets `-wt` narrower than the source's float type, even when the output
-  is `Float32` ([gdal-adapter.md](gdal-adapter.md#how-it-emits-a-warp)).
+  and the `5` come out as NaN. With `-wt Float64` the neighbours are unchanged. The
+  same happens to a `float32` source under gdalwarp's default working type, with no
+  `Cast` at all. So the adapter always passes `-wt Float64` for a float source with any
+  method other than `Nearest` ([gdal-adapter.md](gdal-adapter.md#how-it-emits-a-warp)).
 - **gdal_translate and a plain VRT** (`gdal.Translate`, GTiff or VRT): `1e39` →
   `FLT_MAX`, `-1e39` → `-FLT_MAX`, `3.5e38` → `FLT_MAX`, and also `inf` → `FLT_MAX` and
   `-inf` → `-FLT_MAX`; NaN → NaN. This clamps genuine infinities as well, so it matches

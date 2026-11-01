@@ -13,8 +13,10 @@ Guards the float rows of the gdalwarp table in [plans/cast.md](../../plans/cast.
   `Infinity`;
 - the translate path (gdal_translate or a plain VRT) clamps, including genuine
   infinities, so the adapter rejects a standalone `Cast` that narrows to `float32`;
-- with `-wt Float32`, bilinear and cubic turn a finite neighbour of an infinite value
-  into NaN, so the adapter never sets `-wt` narrower than the source's float type
+- with a `Float32` working type, which is gdalwarp's default for a `float32` source,
+  bilinear and cubic turn a finite neighbour of an infinite value into NaN, while
+  nearest and a `Float64` working type leave it alone. So the adapter always passes
+  `-wt Float64` for a float source with any method other than nearest
   ([plans/gdal-adapter.md](../../plans/gdal-adapter.md#how-it-emits-a-warp)).
 
 Run it from the repository root:
