@@ -48,9 +48,14 @@ Details in [shapes.md](shapes.md). All pending review.
 - **Size symbols are identified by structure,** not by node, so the same slice of the
   same extent is one size symbol and pushdown keeps its proofs. Mask counts and label
   selections are keyed by value numbering, which never merges nodes.
+- **Axes are named or positional.** An axis is `Named(DimId)` or `Positional`; a
+  positional axis has no stored ID and is identified by its position from the end.
 - **Broadcasting follows the Array API**, aligned from the last axis, with n operands
-  as a left fold. Whether the core also requires aligned axes to share a `DimId` is
-  left for review, with a recommendation. Named broadcasting stays with #34.
+  as a left fold. Named axes must match by name and extent and never stretch, as in
+  xarray 2026.9.0. A positional operand adopts a named operand's names. Decided by
+  Charles, 1 November, after xarray experiments. Still open: whether a positional
+  operand may stretch a named length-1 axis, and how named operands with disjoint
+  dimensions broadcast. Alignment by name stays with #34.
 - **Unresolved isn't an error.** A pair that can't be proven compatible records a
   requirement. The core checks it when its facts arrive: at bind, at label resolution
   or at execution. Rewrites must keep the requirement set's meaning, compared as
