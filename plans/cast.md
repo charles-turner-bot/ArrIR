@@ -44,6 +44,9 @@ pub enum OutOfRange {
     Clamp,
     /// Write `missing.value`. Requires `missing`.
     Missing,
+    /// Overflow to positive or negative infinity, as IEEE 754 narrowing does.
+    /// Float targets only.
+    Infinity,
 }
 
 pub struct MissingEncoding {
@@ -71,6 +74,17 @@ pub enum Collision {
   and needs `missing`. A NaN that isn't missing has no integer value.
 - `Collision` exists because gdalwarp nudges, and because a value that silently becomes
   missing breaks purity rule 4 unless the plan says it may.
+- Converting to a float type rounds to nearest, ties to even, as IEEE 754 defines,
+  whenever the target can't hold the value exactly. That covers 32-bit or wider integers
+  to `float32`, 64-bit integers to `float64`, and `float64` to `float32`. `rounding`
+  doesn't apply, because no fraction reaches an integer type.
+- Narrowing `float64` to `float32` needs `out_of_range` for finite values beyond the
+  `float32` range. `Infinity` matches NumPy's `astype`, while `Clamp` gives the largest
+  finite value. NaN stays NaN, and infinities stay infinite.
+- These float rules were decided with [dtypes.md](dtypes.md) on 1 November; #38
+  reviews `Cast` as a whole. A reduction whose `result` is narrower than its
+  accumulator uses the same rules and the same `OutOfRange`
+  ([dtypes.md](dtypes.md#rules)).
 
 ## Effect on the schema
 
@@ -85,15 +99,46 @@ pub enum Collision {
   is float to integer.
 - `rounding` and `out_of_range` are present exactly when the conversion requires them.
 - `missing.value` is representable in `dtype`.
+- `Infinity` is used only with a float `dtype`.
+- A conversion that can round (the float rules above) needs `missing` whenever the
+  input's missing values include a sentinel other than NaN, so its `Collision` is
+  explicit. A rounded valid value can otherwise land on that sentinel without the plan
+  saying it may ([dtypes.md](dtypes.md#casts-that-lowering-inserts), #39). Nothing
+  rounds onto NaN, so NaN alone doesn't need it.
 
 ## What gdalwarp can emit
 
-From Mike's reading of the GDAL source, still to be checked by fixtures:
+From Mike's reading of the GDAL source, still to be checked by fixtures, except where
+a row says verified:
 
-| gdalwarp working type | `Rounding` | `Collision` |
-| --- | --- | --- |
-| integer (`-wt` set to the output type) | `NearestTiesUp` | `Nudge` |
-| float, integer output | `NearestTiesAway` | `Keep` (the nudge is undone by rounding) |
-| float, float output | none needed | `Nudge` |
+| GDAL path | `Rounding` | `OutOfRange` | `Collision` |
+| --- | --- | --- | --- |
+| gdalwarp, integer working type (`-wt` set to the output type) | `NearestTiesUp` | `Clamp` | `Nudge` |
+| gdalwarp, float working type, integer output | `NearestTiesAway` | `Clamp` | `Keep` (the nudge is undone by rounding) |
+| gdalwarp, float working type, float output | none needed | `Infinity` (verified) | `Nudge` |
+| ordinary conversion (a `Cast` with no warp), integer output | `NearestTiesAway` | `Clamp` | `Keep` |
+| ordinary conversion, float output | none needed | none: clamps infinities too, so rejected | `Keep` |
 
 The GDAL adapter rejects any other combination.
+
+"Verified" means checked by experiment, on 1 November 2026, with GDAL 3.13.3 (Python
+bindings) and NumPy 2.5.4, narrowing a `float64` raster to `Float32`:
+
+- **gdalwarp and a warped VRT** (`gdal.Warp`, also with `format="VRT"`), the same with
+  `-r near` and `bilinear` and with `-wt Float64` or `Float32`: `1e39` → `inf`,
+  `-1e39` → `-inf`, `3.5e38` → `inf`, `inf` → `inf`, `-inf` → `-inf`, NaN → NaN,
+  `FLT_MAX` and `nextafter(FLT_MAX)` → `FLT_MAX`, `1.5` → `1.5`. This is IEEE 754
+  overflow, the same as NumPy's `astype`, so the row is `Infinity`.
+- **gdal_translate and a plain VRT** (`gdal.Translate`, GTiff or VRT): `1e39` →
+  `FLT_MAX`, `-1e39` → `-FLT_MAX`, `3.5e38` → `FLT_MAX`, and also `inf` → `FLT_MAX` and
+  `-inf` → `-FLT_MAX`; NaN → NaN. This clamps genuine infinities as well, so it matches
+  neither `Infinity` nor `Clamp`, under which infinities stay infinite.
+
+So a `Warp` followed by a `Cast` that narrows to `float32` renders, with `Infinity`.
+A standalone `Cast` that narrows to `float32` uses GDAL's ordinary conversion, which no
+`OutOfRange` variant describes, so the adapter rejects it (purity rule 4; decided
+1 November, [dtypes.md](dtypes.md#decisions) question 9). A `float32` output that needs
+no narrowing is unaffected. If a real case needs that conversion, a "clamp including
+infinities" variant could be added. The #42 fixture for the meaning check in
+[gdal-adapter.md](gdal-adapter.md#done-when) should encode these same cases, so that a
+GDAL upgrade that changes either behaviour is caught.

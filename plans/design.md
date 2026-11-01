@@ -2,8 +2,10 @@
 
 Status: agreed direction, amended 2026-10-27 (see
 [the 27 October discussion](2026-10-27-discussion.md)). The 28 October amendments are
-proposed (see [the 28 October discussion](2026-10-28-discussion.md)). Implementation
-proceeds in the small steps below.
+proposed (see [the 28 October discussion](2026-10-28-discussion.md)). The plan graph,
+shape and dtype amendments were decided on 1 November (see
+[the 31 October discussion](2026-10-31-discussion.md)). Implementation proceeds in the
+small steps below.
 
 ## Purpose
 
@@ -46,7 +48,10 @@ so that it agrees with the label rule below.
 
 ## Decisions
 
-- Start with linear unary chains, not a speculative graph.
+- A plan is an append-only DAG of nodes with ordered inputs and one root, as in
+  [dag.md](dag.md). *Decided 1 November; this replaces the original "start with linear
+  unary chains" decision.* A chain is the special case, so the first vertical slice
+  keeps its content.
 - Extract xrexpr's **lowered** operations, not its fluent call recorder.
   `ContextOpen` belongs in host lowering; contextual reductions are semantic nodes.
 - Keep one semantic algebra. Rewrites consume it, not a competing optimiser IR.
@@ -54,6 +59,14 @@ so that it agrees with the label rule below.
   numerically relaxed rewrites require explicit permission. Strictness does not
   imply that unrelated execution engines already guarantee bitwise equality;
   adapters must expose or reject unsupported numerical requirements.
+  *Decided 1 November:* a reduction declares its order, either
+  `Sequential` (strict) or `Unspecified`, which is a relaxation that lowering writes
+  explicitly. Rewrites that split or merge reductions need `Unspecified`
+  ([dtypes.md](dtypes.md#order)).
+- *Decided 1 November:* ArrIR promotes dtypes implicitly only where
+  the conversion is exact, following Array API 2025.12. Every value-changing conversion
+  is a `Cast` that lowering inserts, and a reduction states its accumulator, result and
+  order ([dtypes.md](dtypes.md)).
 - Support external arrays through explicit binding IDs and declared metadata.
   A binding is not an embedded array, a Python pointer, or a download instruction.
   Importing a plan never executes or resolves it automatically.
@@ -65,11 +78,14 @@ so that it agrees with the label rule below.
 
 Added on 27 October:
 
-- **A plan names its data by binding, not location.** Every plan starts with
-  `Open { binding: BindingId, schema }`: a local name and the declared schema of the
-  dataset it binds. Mapping the binding to a URI, a byte-ref table or an in-memory array
-  happens outside the plan. A plan therefore validates offline and never fetches
-  anything when imported.
+- **A plan names its data by binding, not location.** External data enters a plan only
+  through `Open { binding: BindingId, schema }`: a local name and the declared schema of
+  the dataset it binds. *Decided with [dag.md](dag.md) on 1 November; this replaces
+  "every plan starts with `Open`", which is chain wording. `Warp`'s target geometry
+  becomes an `Open` input (dag.md question 7). A literal scalar is a zero-input
+  `Constant` node with no binding ([dtypes.md](dtypes.md)).* Mapping the binding to
+  a URI, a byte-ref table or an in-memory array happens outside the plan. A plan
+  therefore validates offline and never fetches anything when imported.
 - **`Open` binds a dataset, not one variable,** because the logical schema is
   dataset-level, as in xrexpr. Choosing a variable is a projection.
 - **Label selection is logical. Resolving it is not.** A label `Select` is representable
@@ -110,6 +126,14 @@ Proposed on 28 October, designed in [grids.md](grids.md):
 - **The GDAL adapter renders VRT text** ([gdal-adapter.md](gdal-adapter.md)). It does no
   I/O and doesn't link GDAL, and it rejects what GDAL can't do exactly.
 
+Decided by Charles on 1 November 2026, detailed in `shapes.md` (#46):
+
+- **Broadcasting.** An axis is named or positional, and only positional axes stretch
+  (length 1). Named shapes align by name: a dimension on both operands needs equal
+  extents, and a dimension on one side only is broadcast, not stretched. A positional
+  operand adopts a named operand's names but never stretches a named axis. Positional
+  shapes follow the Array API rules. #34 handles coordinate label alignment only.
+
 ## Architecture
 
 Three kinds of thing are involved, and they are generic at different levels:
@@ -126,7 +150,7 @@ plan, but the table only describes what exists. A physical planner combines a lo
 plan with a storage layout to produce a physical plan.
 
 mdim-refs calls its placement layer "the plan". In ArrIR, *plan* always means the logical
-chain, and that layer is called *placements*.
+graph ([dag.md](dag.md)), and that layer is called *placements*.
 
 ### Dependency graph
 
@@ -170,8 +194,9 @@ not change the meaning of earlier ones.
 
 From #16, for positional semantics:
 
-- Dimensions are ordered. Order is part of the schema, and no operation in the current
-  vocabulary reorders it.
+- Dimensions are ordered. Order is part of the schema, and no operation reorders it
+  except as its documented output-order rule says. Name-based alignment is one such
+  rule: `a(x) + b(y, x)` gives `(x, y)` ([shapes.md](shapes.md)).
 - Positions are 0-based, and a negative position counts back from the end. Slices are
   half-open, with Python semantics. Adapters for hosts with other conventions translate
   them. R, for example, is 1-based and treats negative indices as exclusions.
@@ -179,7 +204,10 @@ From #16, for positional semantics:
   whose indexing drops length-1 results (R's `drop = TRUE`) lowers those to scalar
   indexers.
 - A positional mask must match the dimension length exactly. There is no recycling.
-- Label selections have unknown extent until they are resolved.
+- Label selections have unknown extent until they are resolved. In derived shapes that
+  unknown is a size symbol with an identity ([shapes.md](shapes.md)).
+- Broadcasting follows the 1 November decision [above](#decisions), detailed in
+  [shapes.md](shapes.md#broadcasting).
 
 ## What to extract
 
@@ -223,7 +251,8 @@ The first rewrites to port are xrexpr's four rules that act only on selections a
 rechunks: `merge_adjacent_selects`, `merge_adjacent_rechunks`, `pushdown_selects` and
 `pushdown_selects_past_rechunks`. Its four projection rules follow once projections
 exist. The fixpoint and its termination measure (no rule lengthens a plan or moves an
-operation rightwards) carry over with them.
+operation rightwards) carry over with them. For a graph the measure needs restating
+([dag.md](dag.md#rewrites-keep-old-ids-and-roots); deferred to #37).
 
 ## Implementation boundaries
 
@@ -255,11 +284,17 @@ do not omit a semantic field or its tests to satisfy the line count.
    reject anything outside that supported subset.
 6. Reduce and Select operation structs, each with its effects (purity rule 3; `Select`'s
    effects on grids are in [grids.md](grids.md#select-on-a-grid)), then the
-   linear plan starting with `Open`, and structural validation, split into
+   plan as a node arena ([dag.md](dag.md)), and structural validation, split into
    independently understandable PRs. Footprints, the other half of rule 3, come later
    but before any physical planning. Until an operation has one, it can't be physically
    planned. `Warp` follows in its own PR, as in [warp.md](warp.md).
-7. Schema propagation along the chain, and unknown-fact handling.
+7. Schema propagation through the graph, and unknown-fact handling. After the graph in
+   step 6, in this order:
+   - symbolic shape inference: design #29 (`shapes.md`, #46), implementation #2;
+   - dtype inference and reduction accumulation: design #30 (`dtypes.md`, #47),
+     implementation #31;
+   - the first elementwise operations, `Add`, `Multiply` and `GreaterThan`: design #32,
+     implementation #33, using both of the above.
 8. An xrexpr adapter for this subset, first with import/export round-trip tests. Then a
    GDAL adapter for `Open`, positional `Select` and `Warp`, tested against `gdal.Warp`
    through `gdalxarray`, as in [gdal-adapter.md](gdal-adapter.md).
