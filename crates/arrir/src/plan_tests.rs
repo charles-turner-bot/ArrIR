@@ -160,14 +160,92 @@ fn import_rejects_an_id_that_isnt_its_position() {
         "nodes": [{ "id": 3, "op": { "TestOpen": { "binding": "obs" } }, "inputs": [] }],
         "root": 0
     }"#;
-    assert!(serde_json::from_str::<Plan>(json).is_err());
+    let error = serde_json::from_str::<Plan>(json).unwrap_err().to_string();
+    let expected = ImportError::IdNotPosition {
+        position: 0,
+        written: NodeId(3),
+    };
+    assert_eq!(error, expected.to_string());
 }
 
 #[test]
 fn import_rejects_an_unknown_version() {
     let mut json = serde_json::to_value(shared_input_plan()).unwrap();
     json["version"] = "1".into();
-    assert!(serde_json::from_value::<Plan>(json).is_err());
+    let error = serde_json::from_value::<Plan>(json)
+        .unwrap_err()
+        .to_string();
+    assert_eq!(error, ImportError::UnknownVersion("1".into()).to_string());
+}
+
+/// Imports a plan from a list of nodes written as JSON, with root `root`.
+fn import(nodes: &str, root: u32) -> Result<Plan, String> {
+    let json = format!(r#"{{ "version": "0", "nodes": [{nodes}], "root": {root} }}"#);
+    serde_json::from_str::<Plan>(&json).map_err(|error| error.to_string())
+}
+
+const OPEN_OBS: &str = r#"{ "id": 0, "op": { "TestOpen": { "binding": "obs" } }, "inputs": [] }"#;
+
+#[test]
+fn import_rejects_a_dangling_input() {
+    let select = r#"{ "id": 1, "op": { "TestUnary": { "label": "select" } }, "inputs": [5] }"#;
+    let expected = ImportError::Plan(PlanError::DanglingInput {
+        node: NodeId(1),
+        input: NodeId(5),
+    });
+    assert_eq!(
+        import(&format!("{OPEN_OBS}, {select}"), 1).unwrap_err(),
+        expected.to_string()
+    );
+}
+
+#[test]
+fn import_rejects_wrong_arity() {
+    let add = r#"{ "id": 1, "op": { "TestBinary": { "label": "add" } }, "inputs": [0] }"#;
+    let expected = ImportError::Plan(PlanError::WrongArity {
+        node: NodeId(1),
+        expected: Arity::Exactly(2),
+        found: 1,
+    });
+    assert_eq!(
+        import(&format!("{OPEN_OBS}, {add}"), 1).unwrap_err(),
+        expected.to_string()
+    );
+}
+
+#[test]
+fn import_accepts_a_dead_duplicate_open() {
+    let reopen = r#"{ "id": 1, "op": { "TestOpen": { "binding": "obs" } }, "inputs": [] }"#;
+    let plan = import(&format!("{OPEN_OBS}, {reopen}"), 1).unwrap();
+    assert_eq!(plan.graph.len(), 2);
+}
+
+#[test]
+fn import_rejects_an_unknown_operation() {
+    let mystery = r#"{ "id": 0, "op": { "Mystery": {} }, "inputs": [] }"#;
+    let error = import(mystery, 0).unwrap_err();
+    assert!(error.contains("unknown variant `Mystery`"), "{error}");
+}
+
+/// dag.md checks dangling inputs before forward ones, so `[2, 9]` on node 1 reports 9.
+#[test]
+fn a_dangling_input_is_reported_before_a_forward_one() {
+    let mut graph = graph(vec![open("a"), open("b")]);
+    let error = graph.append(binary("add", 2, 9)).unwrap_err();
+    assert_eq!(
+        error,
+        PlanError::DanglingInput {
+            node: NodeId(2),
+            input: NodeId(9)
+        }
+    );
+}
+
+#[test]
+fn plan_new_validates() {
+    assert_eq!(Plan::new(Graph::new(), NodeId(3)), Err(PlanError::Empty));
+    let plan = shared_input_plan();
+    assert_eq!(Plan::new(plan.graph.clone(), plan.root), Ok(plan));
 }
 
 #[test]
@@ -220,71 +298,4 @@ fn unreachable_nodes_are_not_live() {
         unary("reduce", 1),
     ]);
     assert_eq!(graph.live_nodes(NodeId(3)), vec![true, true, false, true]);
-}
-
-/// dag.md's "A rewrite that keeps old roots": push a selection below a shared add.
-#[test]
-fn rewriting_the_root_keeps_the_old_root() {
-    let mut plan = shared_input_plan();
-    plan.graph.append(unary("select", 2)).unwrap(); // node 3, the old root
-    let before = plan.graph.clone();
-
-    let select = plan.graph.append(unary("select", 1)).unwrap(); // node 4
-    let add = plan.graph.append(binary("add", 4, 4)).unwrap(); // node 5
-    let new_root = plan.graph.replace(NodeId(3), NodeId(3), add).unwrap();
-
-    assert_eq!((select, add, new_root), (NodeId(4), NodeId(5), NodeId(5)));
-    assert_eq!(
-        &plan.graph.nodes()[..4],
-        before.nodes(),
-        "old nodes unchanged"
-    );
-    let live = plan.graph.live_nodes(new_root);
-    assert_eq!(live, vec![true, true, false, false, true, true]);
-}
-
-/// dag.md's "Rewriting below the root": the `Reduce` above the selection is copied.
-#[test]
-fn rewriting_below_the_root_copies_the_path_and_reuses_the_rest() {
-    let mut graph = graph(vec![
-        open("obs"),
-        unary("project a", 0),
-        unary("project b", 0),
-        binary("add", 1, 2),
-        unary("select", 3),
-        unary("reduce", 4),
-    ]);
-    let before = graph.clone();
-    graph.append(unary("select", 1)).unwrap(); // 6
-    graph.append(unary("select", 2)).unwrap(); // 7
-    let add = graph.append(binary("add", 6, 7)).unwrap(); // 8
-
-    let new_root = graph.replace(NodeId(5), NodeId(4), add).unwrap();
-
-    assert_eq!(new_root, NodeId(9));
-    assert_eq!(graph.node(new_root), &unary("reduce", 8));
-    assert_eq!(&graph.nodes()[..6], before.nodes(), "root 5 is unchanged");
-    let live: Vec<usize> = graph
-        .live_nodes(new_root)
-        .iter()
-        .enumerate()
-        .filter(|(_, live)| **live)
-        .map(|(index, _)| index)
-        .collect();
-    assert_eq!(live, vec![0, 1, 2, 6, 7, 8, 9]);
-}
-
-#[test]
-fn a_shared_node_off_the_path_is_reused_not_copied() {
-    // Both inputs of the add read node 1. Replacing node 2 copies only the add.
-    let mut graph = graph(vec![
-        open("obs"),
-        unary("project", 0),
-        unary("select", 1),
-        binary("add", 2, 1),
-    ]);
-    let other = graph.append(unary("other select", 1)).unwrap(); // 4
-    let new_root = graph.replace(NodeId(3), NodeId(2), other).unwrap();
-    assert_eq!(graph.node(new_root), &binary("add", 4, 1));
-    assert_eq!(graph.len(), 6);
 }

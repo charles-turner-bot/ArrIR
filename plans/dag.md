@@ -1,8 +1,8 @@
 # Plans as DAGs
 
 Status: decided 1 November 2026, for issue #27 (proposed 31 October). It replaces the
-"start with linear unary chains" decision in [design.md](design.md#decisions). Nothing
-here is implemented yet; #28 implements it.
+"start with linear unary chains" decision in [design.md](design.md#decisions). The arena,
+structural validation and wire form are implemented in `crates/arrir` (#28, PR #59).
 
 ## Why a chain isn't enough
 

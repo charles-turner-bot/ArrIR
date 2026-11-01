@@ -2,15 +2,15 @@
 //!
 //! The replacement IR is being built in small steps (`plans/design.md`, roadmap). So
 //! far it has the plan container: an append-only DAG of nodes with one root
-//! ([`plan`], [`wire`]). The old scaffold is in [`legacy`]. The shared value types,
+//! ([`Graph`], [`Plan`]). The old scaffold is in [`legacy`]. The shared value types,
 //! such as the symbol IDs, are in the `arrir-types` crate.
 
 pub mod legacy;
-pub mod plan;
-pub mod wire;
+mod plan;
+mod wire;
 
 #[cfg(test)]
 mod plan_tests;
 
 pub use plan::{Arity, Graph, Node, NodeId, Operation, Plan, PlanError};
-pub use wire::{ImportError, WireNode, WirePlan, WIRE_VERSION};
+pub use wire::{ImportError, WIRE_VERSION};

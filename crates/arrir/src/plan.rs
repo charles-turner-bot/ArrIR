@@ -8,6 +8,9 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 /// A node's position in its graph. Never reused. On the wire it is a JSON number.
+///
+/// The field is public on purpose: a `NodeId` is only a position, and every place
+/// that takes one checks it against a graph (`append`, `validate`, import).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct NodeId(pub u32);
@@ -35,6 +38,9 @@ pub enum Operation {
     TestBinary { label: String },
 }
 
+// The matches below are on `*self` with `ref` bindings, not on `self`. Outside tests
+// `Operation` has no variants, and `match self` on a reference to an empty enum doesn't
+// compile, while `match *self` does. Keep this form until the first real operation.
 impl Operation {
     /// How many inputs this operation value takes (rule 3).
     pub fn arity(&self) -> Arity {
@@ -133,14 +139,18 @@ impl Graph {
         &self.nodes
     }
 
-    /// The node with this ID. Panics if the ID isn't in the graph, like slice indexing.
+    /// The node with this ID.
+    ///
+    /// # Panics
+    ///
+    /// If the ID isn't in the graph, like slice indexing.
     pub fn node(&self, id: NodeId) -> &Node {
         &self.nodes[id.index()]
     }
 
     /// Checks the node's inputs (rule 2) and arity (rule 3), then returns its new ID.
     pub fn append(&mut self, node: Node) -> Result<NodeId, PlanError> {
-        let id = NodeId(self.nodes.len() as u32);
+        let id = NodeId(u32::try_from(self.nodes.len()).expect("graph exceeds u32::MAX nodes"));
         check_node(id, &node, self.nodes.len() + 1)?;
         self.nodes.push(node);
         Ok(id)
@@ -148,6 +158,10 @@ impl Graph {
 
     /// Which nodes are live, that is reachable from `root`, indexed by `NodeId`.
     /// Inputs point backwards, so one pass from the root down finds them all.
+    ///
+    /// # Panics
+    ///
+    /// If `root` isn't in the graph. `Plan::validate` checks the root first.
     pub fn live_nodes(&self, root: NodeId) -> Vec<bool> {
         let mut live = vec![false; self.nodes.len()];
         live[root.index()] = true;
@@ -160,56 +174,18 @@ impl Graph {
         }
         live
     }
-
-    /// Replaces `target` with `replacement` in the plan rooted at `root`, and returns
-    /// the new root. Every live node that depends on `target` is appended again with
-    /// its inputs updated (path copying); every other node is reused. No existing node
-    /// changes, so `root` still names the unrewritten plan.
-    ///
-    /// Fails only if `replacement` isn't in the graph.
-    // Outside tests `Operation` has no values yet, so the compiler sees that the copy
-    // below can never be made and warns. The `allow` goes with the first real operation.
-    #[cfg_attr(not(test), allow(unreachable_code, unused_variables, unused_mut))]
-    pub fn replace(
-        &mut self,
-        root: NodeId,
-        target: NodeId,
-        replacement: NodeId,
-    ) -> Result<NodeId, PlanError> {
-        let live = self.live_nodes(root);
-        let mut replaced: BTreeMap<NodeId, NodeId> = BTreeMap::new();
-        replaced.insert(target, replacement);
-        // Only nodes after `target` can depend on it, and only live ones are copied.
-        // `live` covers the graph as it was, so the copies appended below are skipped.
-        for (index, &is_live) in live.iter().enumerate() {
-            if index <= target.index() || !is_live {
-                continue;
-            }
-            let node = &self.nodes[index];
-            if !node.inputs.iter().any(|i| replaced.contains_key(i)) {
-                continue;
-            }
-            let mut copy = node.clone();
-            for input in copy.inputs.iter_mut() {
-                if let Some(&new_input) = replaced.get(input) {
-                    *input = new_input;
-                }
-            }
-            let new_id = self.append(copy)?;
-            replaced.insert(NodeId(index as u32), new_id);
-        }
-        Ok(*replaced.get(&root).unwrap_or(&root))
-    }
 }
 
-/// Checks rules 2 and 3 for node `id` in a graph of `graph_len` nodes. An input at or
-/// after `id` but inside the graph is a forward input (a self-loop included); one past
-/// the end is dangling.
+/// Checks rules 2 and 3 for node `id` in a graph of `graph_len` nodes, in dag.md's
+/// order: dangling inputs (past the end of the graph), then forward inputs (at or after
+/// `id`, a self-loop included), then arity.
 pub(crate) fn check_node(id: NodeId, node: &Node, graph_len: usize) -> Result<(), PlanError> {
     for &input in &node.inputs {
         if input.index() >= graph_len {
             return Err(PlanError::DanglingInput { node: id, input });
         }
+    }
+    for &input in &node.inputs {
         if input >= id {
             return Err(PlanError::ForwardInput { node: id, input });
         }
@@ -227,7 +203,9 @@ pub(crate) fn check_node(id: NodeId, node: &Node, graph_len: usize) -> Result<()
 
 /// What is exported and executed: a graph and the node whose value is the result.
 ///
-/// It serialises through [`crate::wire::WirePlan`], and deserialising validates it.
+/// It serialises through the wire form in `wire.rs`. Deserialising validates it;
+/// serialising doesn't, so build plans with [`Plan::new`] or call [`Plan::validate`]
+/// before export. The fields are public, as dag.md writes them.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(into = "crate::wire::WirePlan", try_from = "crate::wire::WirePlan")]
 pub struct Plan {
@@ -236,6 +214,13 @@ pub struct Plan {
 }
 
 impl Plan {
+    /// A validated plan.
+    pub fn new(graph: Graph, root: NodeId) -> Result<Plan, PlanError> {
+        let plan = Plan { graph, root };
+        plan.validate()?;
+        Ok(plan)
+    }
+
     /// Checks the root, and that each binding is opened by at most one live node
     /// (rule 6). Node rules 2 and 3 already hold, because `Graph::append` checks them.
     pub fn validate(&self) -> Result<(), PlanError> {

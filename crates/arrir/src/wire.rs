@@ -14,7 +14,7 @@ pub const WIRE_VERSION: &str = "0";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct WirePlan {
+pub(crate) struct WirePlan {
     pub version: String,
     pub nodes: Vec<WireNode>,
     pub root: NodeId,
@@ -22,7 +22,7 @@ pub struct WirePlan {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct WireNode {
+pub(crate) struct WireNode {
     pub id: NodeId,
     pub op: Operation,
     pub inputs: Vec<NodeId>,
@@ -47,7 +47,7 @@ impl From<Plan> for WirePlan {
             .iter()
             .enumerate()
             .map(|(index, node)| WireNode {
-                id: NodeId(index as u32),
+                id: NodeId(u32::try_from(index).expect("graph exceeds u32::MAX nodes")),
                 op: node.operation.clone(),
                 inputs: node.inputs.clone(),
             })
@@ -81,7 +81,8 @@ impl TryFrom<WirePlan> for Plan {
                 inputs: wire_node.inputs,
             };
             // Checked against the whole graph's length, so an input to a later node
-            // is a forward input and one past the end is dangling (dag.md).
+            // is a forward input and one past the end is dangling (dag.md). After
+            // this check, `append` can't fail.
             check_node(wire_node.id, &node, total)?;
             graph.append(node)?;
         }
