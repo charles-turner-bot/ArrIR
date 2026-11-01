@@ -22,7 +22,7 @@ This directory preserves the reasoning behind ArrIR, not just a list of features
 - [Symbolic shapes](shapes.md): decided. Named and positional axes, known, symbolic
   and unknown extents, and broadcasting by name or by position, with requirements
   checked at bind, label resolution or execution.
-- [Select and indexing modes](select.md): proposed. Literal and computed indexers,
+- [Select and indexing modes](select.md): decided. Literal and computed indexers,
   orthogonal and pointwise modes, and their shape effects.
 - [Array API coverage](array-api-coverage.md): audit. How each Array API 2025.12
   function maps onto ArrIR, and which concepts are missing.

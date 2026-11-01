@@ -152,8 +152,10 @@ Each indexer acts on an axis with extent `e`: `Known(n)` or a size symbol `s`.
   named shape, its output axis takes the indexer's dimension name:
   `isel(a=P(p), c=Q(q))` gives `(p, b, q)`, as xarray does. An indexer named after the
   axis it indexes keeps that axis's `DimId`; one named after another axis of the array
-  is `CoupledIndexer`. On a positional shape the output axis stays positional, in the
-  same slot. A literal `Positions` keeps the indexed axis.
+  is `CoupledIndexer`. Two orthogonal indexers with the same dimension name are
+  `DuplicateOutputDim`: xarray treats `isel(a=P(p), c=P(p))` as pointwise and gives
+  `(p, b)`, so lowering emits pointwise mode for it. On a positional shape the output
+  axis stays positional, in the same slot. A literal `Positions` keeps the indexed axis.
 - **A computed mask is one-dimensional** and lies along the indexed axis. On a named
   shape its axis must be the same `DimId`. On a positional shape it is matched by
   position. Its extent must equal `e`: no stretching, no recycling.
@@ -184,7 +186,10 @@ slices on other axes act as in orthogonal mode.
     (`CoupledIndexer`). xarray then gathers along that axis
     (`take_along_axis`-like), which the Array API doesn't specify.
   - Slices mixed with integer arrays on a positional shape
-    (`MixedSliceAndArray`), which the Array API leaves unspecified.
+    (`MixedSliceAndArray`), which the Array API leaves unspecified. An un-indexed
+    axis counts as a full slice, as Ellipsis does, so `nd[i]` on a 2-D array is
+    rejected in pointwise mode. A one-dimensional gather on one axis is orthogonal
+    mode instead. On positional shapes `insert_at` is therefore always 0.
   - `Label` indexers (`LabelInPointwise`). Label resolution runs first.
 - **Lowering emits orthogonal mode where it is equivalent.** A vectorised xarray
   `isel` whose array indexers are all one-dimensional with distinct dimension names is
@@ -220,7 +225,8 @@ A label `Select` stays representable without coordinates (design.md, purity rule
   and scalars, position lists and masks remove placements. Computed `IntArray` and
   `BoolArray` indexers act like position lists and masks: they remove every placement
   on that grid. Pointwise mode removes the placements of every grid with an axis
-  indexed by an array; an axis indexed only by a slice transforms its grid as usual. An unresolved label leaves the grid `Unresolved` (#26).
+  indexed by an array; an axis indexed only by a slice transforms its grid as usual.
+  An unresolved label leaves the grid `Unresolved` (#26).
 
 ## Pushdown rules for #37
 
@@ -245,8 +251,10 @@ A label `Select` stays representable without coordinates (design.md, purity rule
 3. **Merging adjacent selections,** only when the merged indexer is exact for every
    length of the input. Slices compose by shapes.md's normalisation. A scalar or
    position list after a slice maps back through it only when the slice has a
-   non-negative start and a positive step and the positions are non-negative, and the
-   `InRange` requirement stays against the slice's extent. Otherwise they don't merge:
+   non-negative start `a`, a positive step `k` and no stop, and the positions are
+   non-negative. Then `x[a::k][[p]]` is `x[[a + k·p]]`, and `p < ceil((s - a) / k)`
+   holds exactly when `a + k·p < s`, so the two `InRange` requirements agree. Otherwise
+   they don't merge:
    `x[-5:][[3]]` raises at length 3 but gives element 6 at length 8, and `x[0:2][[3]]`
    raises where `x[[3]]` may not. Literal masks compose. Computed indexers don't merge.
 4. **Past `Cast` and `Project`,** for any indexer. Past a `Reduce`, only on axes the
@@ -284,6 +292,8 @@ pub enum SelectError {
     LabelInPointwise { node: NodeId, axis: AxisRef },
     MixedSliceAndArray { node: NodeId },
     CoupledIndexer { node: NodeId, dim: DimId },
+    /// Two orthogonal indexers whose output axes share a dimension name.
+    DuplicateOutputDim { node: NodeId, dim: DimId },
 }
 
 /// Raised by the engine or adapter at execution; the core never sees the values.
