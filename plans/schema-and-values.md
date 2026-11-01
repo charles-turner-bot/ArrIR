@@ -9,8 +9,8 @@ restating their rules.
 
 Implemented so far, in `arrir-types`: `Schema`, `ResultKind`, `Variable`,
 `VariableAxis`, roles, a flat `DType`, `TypeKnowledge`, a declared `Extent` (`Known`
-and `Unknown`) and structural validation. Missing values, scalars, spatial state and grids
-follow in later PRs.
+and `Unknown`) and structural validation. Missing values, scalars, spatial state and
+grids follow in later PRs.
 
 ## Design rule
 

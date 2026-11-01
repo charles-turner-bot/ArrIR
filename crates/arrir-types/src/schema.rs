@@ -119,7 +119,7 @@ impl Schema {
     ///
     /// Unknown dtypes and extents are allowed: they are missing facts, not
     /// contradictions. The first error found is returned: the array payload first, then
-    /// each variable in order, then `sizes`.
+    /// each variable in order, then array coordinates against the payload, then `sizes`.
     pub fn validate(&self) -> Result<(), SchemaError> {
         if let ResultKind::Array(array) = &self.result {
             if !self.variables.iter().any(|v| v.id == array.variable) {
@@ -158,16 +158,16 @@ impl Schema {
                 variable: variable.id.clone(),
             });
         }
-        let mut seen_dims: Vec<&DimId> = Vec::new();
+        let mut seen_dims: BTreeSet<&DimId> = BTreeSet::new();
         for axis in &variable.dims {
             if let VariableAxis::Named(dim) = axis {
-                if seen_dims.contains(&dim) {
+                // `insert` returns false when the dimension was already there.
+                if !seen_dims.insert(dim) {
                     return Err(SchemaError::RepeatedDimension {
                         variable: variable.id.clone(),
                         dim: dim.clone(),
                     });
                 }
-                seen_dims.push(dim);
             }
         }
 
