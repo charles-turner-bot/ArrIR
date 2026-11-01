@@ -242,8 +242,8 @@ A label `Select` stays representable without coordinates (design.md, purity rule
    computed masks. Pushing a mask computed from the operand it selects
    (`Select(f, BoolArray(f > 0))`) is legal but saves nothing, since `f` is still
    computed in full; #37's cost model should say so.
-2. **Through elementwise operations with any positional operand,** only `Scalar` and `Slice`,
-   and only when shapes.md has *proven* which operand carries the full extent. On an
+2. **Through elementwise operations with any positional operand,** only `Scalar` and
+   `Slice`, and only when shapes.md has *proven* which operand carries the full extent. On an
    input whose axis is a stretched length 1, a slice leaves the axis alone and a scalar
    becomes `Scalar(0)`. Position lists and masks aren't pushed past a positional
    broadcast: if every input were length 1, `Positions([0, 0])` would change the
@@ -321,7 +321,8 @@ declared by binding `b`, so `s = DeclaredNamed { b, time }`.
 5. **Pointwise, named.** Two `IntArray` inputs with dims `(p: 4)` on `time` and `lat`,
    `insert_at: 0`, give `(p: 4)`.
 6. **Rejected.** `nd[:, i, j]` on a positional shape mixes a slice with integer arrays:
-   `MixedSliceAndArray`. `Select { time: BoolArray(1) }` in pointwise mode is `BoolInPointwise`.
+   `MixedSliceAndArray`. `Select { time: BoolArray(1) }` in pointwise mode is
+   `BoolInPointwise`.
    `da.isel(lat=DataArray(dims="time"))` is `CoupledIndexer`.
 7. **Label.** `Select { time: Label("2020") }` gives `time: LabelSelect`, resolved at
    label resolution, and leaves any grid on `time` `Unresolved`.
