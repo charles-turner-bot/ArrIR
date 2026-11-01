@@ -8,9 +8,9 @@ is #2, after review.
 ## What this decides
 
 How a plan knows the shape of every node's output without reading data, including
-when an extent isn't known yet. It covers broadcasting as the Array API defines it,
-for axes with and without names. Alignment by name or label, such as `(time,) + (lat,)`
-or differently indexed coordinates, is #34's, and lowers to what is defined here.
+when an extent isn't known yet. It covers broadcasting: by position for unnamed axes, as
+the Array API defines it, and by name for named axes, as xarray does. Alignment by
+coordinate labels (inner and outer joins) is #34's, and lowers to what is defined here.
 
 References:
 
@@ -214,36 +214,26 @@ execution can't be physically planned until the mask it depends on has been eval
 
 ## Broadcasting
 
-Operands of an elementwise operation (#32) are aligned from their last axis, as in the
-Array API. An operand with fewer axes is extended on the left: its missing leading axes
-are absent, not length 1, and take the other operand's axis unchanged. So a
-zero-dimensional operand broadcasts against anything, and `(x: 3) + (y: 2, x: 3)` is
-`(y: 2, x: 3)`. What happens at each aligned pair of present axes depends on the names:
+Operands of an elementwise operation (#32) combine by one of three rules, chosen by
+whether their shapes are named or positional:
 
-| Left | Right | Rule | Output axis |
-| --- | --- | --- | --- |
-| `Positional` | `Positional` | Array API: equal, or one is 1 ([table below](#combining-two-positional-extents)) | `Positional` |
-| `Named(a)` | `Named(a)` | extents must be equal; no length-1 stretching | `Named(a)` |
-| `Named(a)` | `Named(b)`, `a ≠ b` | error `AxisNameMismatch` | — |
-| `Named(a)` | `Positional`, or the reverse | positional equals named or is 1 ([below](#named-with-positional-follows-xarray)) | `Named(a)` |
+| Operands | Rule | Output |
+| --- | --- | --- |
+| positional, positional | Array API: align from the last axis; extents equal, or one is 1 | positional |
+| named, named | align by name; shared dims must have equal extents; a dim on one side only is broadcast | named |
+| named, positional | the positional operand adopts the named operand's names by trailing position | named |
 
-**Named axes never stretch.** xarray 2026.9.0 raises `AlignmentError` ("conflicting
-dimension sizes: {1, 2}") for `named(y: 1) + named(y: 2)` without coordinates; with
-coordinates it's a label join, which is #34's. So two named extents must be equal, and
-with unknown extents the requirement is `s = t` (`Equal`), not `s ∈ {1, t}`. Unequal
-known extents are `IncompatibleExtents`.
+**Only positional axes stretch.** A length-1 positional axis can take any extent. A named
+axis never changes its extent: two named operands must agree on every shared dim, and a
+positional operand may not stretch a named length-1 axis. Broadcasting a dim that one
+named operand lacks *creates* an axis on that operand, which isn't stretching.
 
-Two named operands must already be aligned by name. Bringing `(time,)` and `(lat,)`
-together, or reordering axes to match, is #34's lowering job, not the core's. The core
-orders the result by right alignment; xarray orders `named(x: 3) + named(y: 2, x: 3)` as
-`(x, y)`, the first operand's dimensions followed by the new ones, so #34 reproduces that
-order with `permute_dims`. Two named operands that each have a dimension the other
-lacks, such as `a(x) + b(y)`, can't be aligned by these rules alone; see question 10.
+### Positional with positional: the Array API
 
-### Combining two positional extents
-
-Write `L` and `R` for the extents of one aligned pair of positional axes. `k` and `j` are known values
-other than 1; `s` and `t` are different size symbols.
+Align from the last axis. An operand with fewer axes is extended on the left with
+length-1 axes, so a zero-dimensional operand broadcasts against anything. Each aligned
+pair combines as follows. `k` and `j` are known values other than 1; `s` and `t` are
+different size symbols.
 
 | `L` | `R` | Output | Compatibility | Requirement recorded |
 | --- | --- | --- | --- | --- |
@@ -260,20 +250,36 @@ other than 1; `s` and `t` are different size symbols.
 contradicted, as in the Array API. With a size symbol, `Known(0)` gives `Known(0)` and
 the requirement `s ∈ {1, 0}`.
 
+### Named with named: by name, as xarray
+
+- **Shared dims** must have equal extents, with no length-1 stretching. Unequal known
+  extents are `IncompatibleExtents`. With unknown extents the requirement is `s = t`
+  (`Equal`), and the output takes the lower-numbered of the two size symbols, so it
+  doesn't depend on operand order.
+- **A dim on one operand only** is broadcast: the output has it, with the extent and size
+  symbol it has on that operand.
+- **Output order** is the first operand's dims, then the second operand's new dims in
+  their order. xarray 2026.9.0 orders `named(x: 3) + named(y: 2, x: 3)` as `(x, y)`.
+
+This is xarray's rule for arrays without coordinates. With index coordinates, xarray
+also aligns labels (inner or outer joins); that is #34's, which lowers it to selections
+before the elementwise node. Matching by name is the core's, so #34 needs no
+`expand_dims` or `permute_dims` to line names up.
+
 ### Named with positional follows xarray
 
-A positional operand takes the names of the named operand it's combined with, under
-two conditions:
+A positional operand takes the names of the named operand it's combined with, aligned
+from the last axis, under two conditions:
 
 1. **It has no more axes than the named operand.** Otherwise the result would have an
    unnamed axis among named ones. The error is `PositionalOutranksNamed`.
 2. **At each aligned pair, the positional extent equals the named one or is 1.** The
-   positional side may stretch; the named side never does, and the output keeps the
-   named extent. A positional axis meeting a named axis of length 1 is
-   `PositionalStretchesNamed`. Whether to allow that case is still open (question 2).
+   output keeps the named extent. A positional axis meeting a named axis of length 1 is
+   `PositionalStretchesNamed`, with or without coordinates.
 
 With unknown extents, condition 2 becomes the requirement `positional ∈ {1, named}`
-(`FitsNamed`, below).
+(`FitsNamed`, below). The named operand's missing leading axes don't exist: the
+positional operand is the one extended, as in the Array API.
 
 Evidence, with `da` a `DataArray` on `(y: 2, x: 3)` and `nd` a NumPy array:
 
@@ -287,35 +293,44 @@ Evidence, with `da` a `DataArray` on `(y: 2, x: 3)` and `nd` a NumPy array:
 | `da(x: 3) + nd(3, 3)` | `ValueError` | `PositionalOutranksNamed` |
 | `da + nd(2,)` | `ValueError` (NumPy mismatch) | `IncompatibleExtents` |
 | `named(y: 1) + named(y: 2)`, no coordinates | `AlignmentError` | `IncompatibleExtents` |
+| `named(x: 3) + named(y: 2, x: 3)` | `(x: 3, y: 2)` | same |
 | `da(y: 1, x: 3) + nd(2, 3)` | accepted: `y` has length 2, its coordinate length 1 | `PositionalStretchesNamed` |
 
-The `da(y: 1, x: 3) + nd(2, 3)` row is the one deliberate difference. xarray returns an
-object whose `y` coordinate no longer matches its dimension, so ArrIR rejects it rather
-than copy it, pending question 2.
+The last row is the one deliberate difference. xarray returns an object whose `y`
+coordinate no longer matches its dimension. ArrIR rejects it, for three reasons: one
+rule covers every case ("only positional axes stretch"); shape rules don't depend on
+whether an axis has a coordinate; and allowing it later loosens a rule, which can't
+break a plan that was valid.
 
 ### More than two operands
 
-Broadcasting `n` operands, for `where` and the rest of #32, is a left fold over pairs:
-`a, b, c` combines `a` with `b`, then the result with `c`. Each step records its own
-requirements. `Broadcast` terms are flattened, sorted and deduplicated, so `(a, b, c)`
-and `(c, a, b)` give the same size symbol for each axis, and their requirements
+`where` and the rest of #32 take `n` operands. They combine in two stages, which is what
+xarray's `apply_ufunc` does:
+
+1. **Named operands** combine by name, as a left fold in operand order. Shared dims must
+   agree and new dims are appended, so the output order is each dim's first appearance
+   across the operands. The fold is stable under regrouping: `(a + b) + c` and
+   `a + (b + c)` give the same order. Swapping operands changes the order, as in xarray,
+   so a rewrite that swaps them must also insert a `permute_dims`.
+2. **Positional operands** broadcast together by the Array API, then adopt names from the
+   named result of stage 1, under the two conditions above. If there are no named
+   operands, the result is positional.
+
+Adoption is against the combined named shape, not against whichever named operand comes
+next. With `x(x: 3)`, `y(y: 3)` and a positional `p(3,)`, `p` aligns with `y`, the last
+axis of `(x, y)`, in every operand order that keeps `x` before `y`. Folding `p` with
+`x` first would have aligned it with `x` instead, which is why the stages are separate.
+
+Within each stage, acceptance and requirements don't depend on order. `Broadcast` terms
+are flattened, sorted and deduplicated, so the size symbols agree; the requirements
 normalise to the same set (see [Rewrites](#rewrites-keep-requirements-exactly)).
+Positional extents fit a named extent `n` whether they meet it one by one or after
+broadcasting together: `p` and `q` broadcast to a value in `{1, n}` exactly when each
+of them is in `{1, n}`. Which error is reported first can depend on the order.
 
-The fold is order-independent for a mix of named and positional operands too, in
-whether it accepts and in the result's shape:
-
-- The result is named if any operand is, and positional otherwise.
-- `PositionalOutranksNamed` depends only on the largest positional rank and the named
-  rank, which no order changes.
-- Named operands must agree pairwise by name and extent, whichever order they meet in.
-- Each positional extent must fit the named extent, whether it meets it directly or
-  after broadcasting with other positional operands: `p` and `q` broadcast to a value in
-  `{1, n}` exactly when each of them is in `{1, n}`.
-
-Which error is reported first can depend on the order; acceptance and the result can't.
-Whether reordering or reassociating the operands is *allowed* is a numerics question
-(strict floating-point order, design.md and #47); this only says the shape
-requirements then agree.
+Whether reordering or regrouping the operands is *allowed* is a numerics question
+(strict floating-point order, design.md and #47); this only says the shape requirements
+then agree.
 
 ### Proven, contradicted, unresolved
 
@@ -379,11 +394,11 @@ pairs `{a, b}`, `{a, c}` and `{b, c}`. Structural size symbols, normalised slice
 value numbering are what make "unchanged" achievable for selection pushdown.
 
 A rewrite whose legality depends on which operand stretches needs that pair to be
-proven, not unresolved. dag.md's pushdown of `Select { time }` below an `Add` doesn't
-slice a size-one `time` axis, so it applies only when each operand's `time` is proven
-equal to the output's or, for a positional operand, proven to be 1. With `s ∈ {1, k}` unresolved, the rewrite doesn't
-apply. When one operand is positional, the pushed selection applies to it by position,
-at the axis aligned with `time`. #37 checks these conditions.
+proven, not unresolved. Pushing `Select { time }` below an `Add` (dag.md) selects on each
+named operand that has `time`, whose extent equals the output's, and on nothing else.
+A positional operand is selected by position at the axis aligned with `time`, unless that
+axis is proven to be 1; with `p ∈ {1, k}` unresolved, the rewrite doesn't apply. #37
+checks these conditions.
 
 Semantic readiness (#26) uses the same distinction. An operation that needs a concrete
 extent, such as a `ChunkSpec` block partition or a future `Reshape`, is not ready while
@@ -394,7 +409,6 @@ that extent is symbolic. That isn't a validation error.
 ```rust
 pub enum ShapeError {
     IncompatibleExtents { node: NodeId, axis: AxisRef, left: u64, right: u64 },
-    AxisNameMismatch { node: NodeId, position_from_end: u32, left: DimId, right: DimId },
     PositionalOutranksNamed { node: NodeId, positional_rank: u32, named_rank: u32 },
     PositionalStretchesNamed { node: NodeId, dim: DimId, positional: u64 },
     MixedAxisNames { node: NodeId },
@@ -418,7 +432,7 @@ pub enum RequirementViolated {
 }
 ```
 
-`position_from_end`, like `AxisRef::FromEnd`, is 1 for the last axis. `ShapeError`s sit beside dag.md's
+`AxisRef::FromEnd(1)` is the last axis. `ShapeError`s sit beside dag.md's
 structural `PlanError`: a plan can be structurally valid and still have a shape error.
 
 ## Worked examples
@@ -445,33 +459,40 @@ Positional:
 
 Named:
 
-7. **Equal extents.** `(y: 2, x: 3) + (y: 2, x: 3)` gives `(y: 2, x: 3)`. `(x: 3) +
-   (y: 2, x: 3)` gives `(y: 2, x: 3)`, the missing `y` being absent, not length 1.
+7. **By name.** `(y: 2, x: 3) + (y: 2, x: 3)` gives `(y: 2, x: 3)`. `(x: 3) +
+   (y: 2, x: 3)` gives `(x: 3, y: 2)`: first operand's dims, then the new `y`. `(x: s) +
+   (y: t)` gives `(x: s, y: t)`, proven, with no requirement.
 8. **No stretching.** `(y: 1, x: 3) + (y: 2, x: 3)` is `IncompatibleExtents`, as xarray's
    `AlignmentError`. `(t: s) + (t: k)` from two `Open`s records `Equal` for `s = k`.
    `(t: s) + (t: s)` from one `Open` is proven.
-9. **Wrong alignment.** `(lat: 180, lon: 180) + (lat: 180)` aligns `lon` with `lat`:
-   `AxisNameMismatch { position_from_end: 1, left: lon, right: lat }`. NumPy accepts
-   the same shapes, unnamed, and adds along longitude. #34 lowers the xarray version.
+9. **Names, not positions.** `(lat: 180, lon: 180) + (lat: 180)` gives
+   `(lat: 180, lon: 180)`, adding along `lat`. NumPy, with the same shapes unnamed, adds
+   along the last axis, which here is longitude.
 10. **Label selection.** `ds.sel(time="2020") + (time: 12)`: `s = 12` with `s` a
     `LabelSelect` term, checked at label resolution, not at bind.
+11. **Three operands.** `where(c(x: 3), a(y: 2), b(y: 2, x: 3))` gives `(x: 3, y: 2)`;
+    regrouping gives the same order.
 
 Named with positional:
 
-11. `(y: 2, x: 3) + (2, 3)` gives `(y: 2, x: 3)`. `(y: 2, x: 3) + (3,)` gives the same.
+12. `(y: 2, x: 3) + (2, 3)` gives `(y: 2, x: 3)`. `(y: 2, x: 3) + (3,)` gives the same.
     `(x: 3) + (3, 3)` is `PositionalOutranksNamed`. `(y: 1, x: 3) + (2, 3)` is
     `PositionalStretchesNamed`. `(y: s, x: 3) + (p, 3)` gives `(y: s, x: 3)` and records
     `FitsNamed` for `p ∈ {1, s}`.
+13. **Adoption after combining names.** `where(p(3,), x(x: 3), y(y: 3))` combines `x` and
+    `y` into `(x: 3, y: 3)`, then `p` adopts `y`, the last axis.
 
-## No explicit Broadcast node, for now
+## No explicit Broadcast node
 
-Inference on each elementwise node gives the output shape, so lowering doesn't insert
-a `Broadcast` node before arithmetic. A node would add a second spelling of the same
-plan that every rewrite would have to normalise. The Array API's `broadcast_to` and
-`broadcast_arrays` are frontend functions; #41's coverage matrix records whether they
-lower to a node or a composition. Reordering axes (`permute_dims`, #4) is a separate
-operation that #34 needs. Broadcasting named operands that each have a dimension the
-other lacks is question 10, and one answer to it is a named broadcast node.
+Inference on each elementwise node gives the output shape, for named and positional
+operands alike, so lowering doesn't insert a `Broadcast` node before arithmetic. A node
+would add a second spelling of the same plan that every rewrite would have to normalise.
+The Array API's `broadcast_to` and `broadcast_arrays` are frontend functions; #41's
+coverage matrix records whether they lower to a node or a composition.
+
+`expand_dims` is positional only: named shapes never need a length-1 axis to line up,
+because they align by name. Reordering axes (`permute_dims`, #4) remains an operation in
+its own right, and a rewrite that swaps named operands needs it to keep their order.
 
 ## Implementation through #2
 
@@ -484,7 +505,7 @@ other lacks is question 10, and one answer to it is a named broadcast node.
    `Reduce`, with checked element counts (from closed #1).
 3. Broadcasting for a test operation of any arity, named, positional and mixed, with
    each worked example and each row of the xarray table above as a test, including the
-   requirements it records. #33 then uses it for `Add`, `Multiply`
+   requirements it records and the output axis order. #33 then uses it for `Add`, `Multiply`
    and `GreaterThan`.
 4. The requirement check, with `RequirementViolated` tests at bind and at label
    resolution.
@@ -500,15 +521,11 @@ None of these reads data, and the tests assert that.
    `SymbolInDeclaredSchema`. Two types (declared `Known | Unknown`, derived
    `Known | Symbolic`) make it a compile-time fact but duplicate `Schema`.
    **Recommended: one enum with the serde guard.**
-2. **(A) Names in broadcasting.** Decided by Charles, 1 November: axes are named or
-   positional; named axes must match by name and extent, with no length-1 stretching;
-   positional axes follow the Array API; a positional operand adopts a named operand's
-   names. **Still open:** may a positional operand stretch a named length-1 axis?
-   xarray 2026.9.0 allows it but leaves the coordinate at length 1. As written, it is
-   rejected (`PositionalStretchesNamed`); allowing it would need the stretched axis's
-   coordinate dropped or marked unresolved. **Recommended: reject,** since an
-   inconsistent coordinate is the worse outcome and a host can `Select` or broadcast
-   first.
+2. **(A) Names in broadcasting.** Decided by Charles, 1 November: see
+   [Broadcasting](#broadcasting). A positional operand may not stretch a named length-1
+   axis, with or without coordinates: one rule ("only positional axes stretch"), shape
+   rules that don't depend on coordinate roles, and a restriction that can be loosened
+   later without breaking a valid plan.
 3. **(B) Size-symbol identity.** By term structure (as written), so rewrites keep
    proofs, or by node, which is simpler but makes pushdown turn proven pairs into
    unresolved ones. **Recommended: structure.**
@@ -518,8 +535,7 @@ None of these reads data, and the tests assert that.
 5. **Unresolved broadcasts.** Accept them with a requirement checked at its resolution
    point, or reject them until the extents are known? **Recommended: accept.**
 6. **No solver.** Check each requirement on its own for now? **Recommended: yes.**
-7. **No Broadcast node for positional operands,** with `broadcast_to` left to #41?
-   **Recommended: yes.** Named operands are question 10.
+7. **No Broadcast node,** with `broadcast_to` left to #41? **Recommended: yes.**
 8. **Staggered offsets.** A `StaggerOffset` requirement (as written), or an offset term
    `s + delta` so an outer dimension's size symbol derives from its centre's?
    **Recommended: the requirement,** until a rewrite needs to reason about offsets.
@@ -527,14 +543,6 @@ None of these reads data, and the tests assert that.
    by value number (as written), so shared masks and path copies keep their size
    symbols, or by node, which is simpler but makes any rewrite near a mask or label
    selection turn proven pairs into unresolved ones? **Recommended: value numbering.**
-10. **Named outer broadcasting.** `a(x) + b(y)` gives `(x, y)` in xarray. With named
-    axes that never stretch and right alignment, the core can't express it: `a` has no
-    `y`, and a length-1 `y` added by `expand_dims` may not stretch. Options:
-    - an explicit named broadcast node (`BroadcastTo { axes }`, extents taken from the
-      other operand's schema), which #34 inserts before the elementwise node;
-    - letting an axis created by `expand_dims` count as absent, so it stretches;
-    - going through positional: drop names, broadcast, then name the result again.
-
-    **Recommended: the explicit node.** It keeps "named axes never stretch" without
-    exceptions, and keeps the stretch visible to rewrites. This reverses "no Broadcast
-    node" for named operands only.
+10. **Named outer broadcasting.** Decided by Charles, 1 November: named shapes align
+    by name, so `a(x) + b(y)` gives `(x, y)` with no broadcast node and no
+    `expand_dims`. A dim on one operand only is created on the other, not stretched.

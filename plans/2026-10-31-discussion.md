@@ -50,12 +50,13 @@ Details in [shapes.md](shapes.md). All pending review.
   selections are keyed by value numbering, which never merges nodes.
 - **Axes are named or positional.** An axis is `Named(DimId)` or `Positional`; a
   positional axis has no stored ID and is identified by its position from the end.
-- **Broadcasting follows the Array API**, aligned from the last axis, with n operands
-  as a left fold. Named axes must match by name and extent and never stretch, as in
-  xarray 2026.9.0. A positional operand adopts a named operand's names. Decided by
-  Charles, 1 November, after xarray experiments. Still open: whether a positional
-  operand may stretch a named length-1 axis, and how named operands with disjoint
-  dimensions broadcast. Alignment by name stays with #34.
+- **Only positional axes stretch.** Positional shapes broadcast by the Array API.
+  Named shapes align by name, as xarray 2026.9.0 does without coordinates: shared dims
+  must have equal extents, a dim on one side only is created on the other, and the
+  output takes the first operand's dims then the new ones. A positional operand adopts
+  a named operand's names but may not stretch a named length-1 axis. No broadcast node,
+  and `expand_dims` is positional only. Decided by Charles, 1 November, after xarray
+  experiments. Coordinate label alignment stays with #34.
 - **Unresolved isn't an error.** A pair that can't be proven compatible records a
   requirement. The core checks it when its facts arrive: at bind, at label resolution
   or at execution. Rewrites must keep the requirement set's meaning, compared as
