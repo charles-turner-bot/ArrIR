@@ -99,8 +99,8 @@ pairs the graph with the one root being exported or executed.
    }
    ```
 
-   `Open` is `Exactly(0)`, as is a literal node (#47, dtypes.md). `Project`, `Cast` and an
-   unweighted `Reduce` are `Exactly(1)`; a weighted `Reduce` is `Exactly(2)`, its
+   `Open` is `Exactly(0)`, as is a literal node (#47, dtypes.md). `Project`, `Cast` and
+   an unweighted `Reduce` are `Exactly(1)`; a weighted `Reduce` is `Exactly(2)`, its
    weights being the second input. A `Select` takes one input plus one per array-valued
    indexer, such as a computed mask (#36). A binary elementwise function is
    `Exactly(2)`, and a future `Concat` is `AtLeast(1)`. The input count must match.
