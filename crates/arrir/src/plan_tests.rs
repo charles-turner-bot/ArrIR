@@ -3,7 +3,7 @@
 
 use arrir_types::BindingId;
 
-use crate::plan::{Arity, Graph, Node, NodeId, Operation, Plan, PlanError};
+use crate::plan::{Arity, Graph, Node, NodeId, Operation, Plan, PlanError, RewriteError};
 use crate::wire::ImportError;
 
 fn open(binding: &str) -> Node {
@@ -337,4 +337,160 @@ fn unreachable_nodes_are_not_live() {
         unary("reduce", 1),
     ]);
     assert_eq!(graph.live_nodes(NodeId(3)), vec![true, true, false, true]);
+}
+
+/// dag.md's "A rewrite that keeps old roots": push a selection below a shared add.
+#[test]
+fn rewriting_the_root_keeps_the_old_root() {
+    let mut plan = shared_input_plan();
+    plan.graph.append(unary("select", 2)).unwrap(); // node 3, the old root
+    let before = plan.graph.clone();
+
+    let select = plan.graph.append(unary("select", 1)).unwrap(); // node 4
+    let add = plan.graph.append(binary("add", 4, 4)).unwrap(); // node 5
+    let new_root = plan.graph.replace(NodeId(3), NodeId(3), add).unwrap();
+
+    assert_eq!((select, add, new_root), (NodeId(4), NodeId(5), NodeId(5)));
+    assert_eq!(
+        &plan.graph.nodes()[..4],
+        before.nodes(),
+        "old nodes unchanged"
+    );
+    let live = plan.graph.live_nodes(new_root);
+    assert_eq!(live, vec![true, true, false, false, true, true]);
+}
+
+/// dag.md's "Rewriting below the root": the `Reduce` above the selection is copied.
+#[test]
+fn rewriting_below_the_root_copies_the_path_and_reuses_the_rest() {
+    let mut graph = graph(vec![
+        open("obs"),
+        unary("project a", 0),
+        unary("project b", 0),
+        binary("add", 1, 2),
+        unary("select", 3),
+        unary("reduce", 4),
+    ]);
+    let before = graph.clone();
+    graph.append(unary("select", 1)).unwrap(); // 6
+    graph.append(unary("select", 2)).unwrap(); // 7
+    let add = graph.append(binary("add", 6, 7)).unwrap(); // 8
+
+    let new_root = graph.replace(NodeId(5), NodeId(4), add).unwrap();
+
+    assert_eq!(new_root, NodeId(9));
+    assert_eq!(graph.node(new_root), &unary("reduce", 8));
+    assert_eq!(&graph.nodes()[..6], before.nodes(), "root 5 is unchanged");
+    let live: Vec<usize> = graph
+        .live_nodes(new_root)
+        .iter()
+        .enumerate()
+        .filter(|(_, live)| **live)
+        .map(|(index, _)| index)
+        .collect();
+    assert_eq!(live, vec![0, 1, 2, 6, 7, 8, 9]);
+}
+
+#[test]
+fn a_shared_node_off_the_path_is_reused_not_copied() {
+    // Both inputs of the add read node 1. Replacing node 2 copies only the add.
+    let mut graph = graph(vec![
+        open("obs"),
+        unary("project", 0),
+        unary("select", 1),
+        binary("add", 2, 1),
+    ]);
+    let other = graph.append(unary("other select", 1)).unwrap(); // 4
+    let new_root = graph.replace(NodeId(3), NodeId(2), other).unwrap();
+    assert_eq!(graph.node(new_root), &binary("add", 4, 1));
+    assert_eq!(graph.len(), 6);
+}
+
+#[test]
+fn replace_rejects_ids_outside_the_graph() {
+    let mut graph = graph(vec![open("obs"), unary("select", 0)]);
+    let bad_root = graph.replace(NodeId(9), NodeId(0), NodeId(1));
+    assert_eq!(bad_root, Err(RewriteError::NotInGraph(NodeId(9))));
+    let bad_target = graph.replace(NodeId(1), NodeId(9), NodeId(1));
+    assert_eq!(bad_target, Err(RewriteError::NotInGraph(NodeId(9))));
+    let bad_replacement = graph.replace(NodeId(1), NodeId(0), NodeId(99));
+    assert_eq!(bad_replacement, Err(RewriteError::NotInGraph(NodeId(99))));
+    assert_eq!(graph.len(), 2, "a failed rewrite appends nothing");
+}
+
+#[test]
+fn replace_rejects_a_target_that_isnt_live() {
+    let mut graph = graph(vec![open("obs"), unary("unused", 0), unary("select", 0)]);
+    assert_eq!(
+        graph.replace(NodeId(2), NodeId(1), NodeId(0)),
+        Err(RewriteError::TargetNotLive(NodeId(1)))
+    );
+}
+
+#[test]
+fn replacing_a_node_with_itself_changes_nothing() {
+    let mut graph = graph(vec![open("obs"), unary("select", 0), unary("reduce", 1)]);
+    assert_eq!(
+        graph.replace(NodeId(2), NodeId(1), NodeId(1)),
+        Ok(NodeId(2))
+    );
+    assert_eq!(graph.len(), 3);
+}
+
+/// Replacing 1 with 2 in `B(1, U(1))`, where 2 is `U(1)` itself: the replacement is
+/// exempt (MLIR's `replaceAllUsesExcept`), so the result is `B(U(1), U(1))`.
+#[test]
+fn a_live_replacement_is_not_rewritten() {
+    let mut graph = graph(vec![
+        open("obs"),
+        unary("project", 0),
+        unary("u", 1),
+        binary("b", 1, 2),
+    ]);
+    let new_root = graph.replace(NodeId(3), NodeId(1), NodeId(2)).unwrap();
+    assert_eq!(graph.node(new_root), &binary("b", 2, 2));
+    assert_eq!(graph.node(NodeId(2)), &unary("u", 1));
+    assert_eq!(graph.len(), 5, "only the root is copied");
+}
+
+/// `a + (a + 1)` with `a` replaced by the existing `a + 1` gives `(a + 1) + (a + 1)`,
+/// not `(a + 1) + ((a + 1) + 1)`.
+#[test]
+fn replacing_with_an_existing_plus_one_keeps_it_as_is() {
+    let mut graph = graph(vec![open("a"), unary("plus one", 0), binary("add", 0, 1)]);
+    let new_root = graph.replace(NodeId(2), NodeId(0), NodeId(1)).unwrap();
+    assert_eq!(graph.node(new_root), &binary("add", 1, 1));
+}
+
+/// In `B(U(1), C(1))` with replacement `U(1)`, `C` is still copied to read `U(1)`,
+/// because the root reaches it by a path that doesn't go through the replacement.
+#[test]
+fn a_node_reached_by_another_path_is_still_copied() {
+    let mut graph = graph(vec![
+        open("obs"),
+        unary("project", 0),
+        unary("u", 1),
+        unary("c", 1),
+        binary("b", 2, 3),
+    ]);
+    let new_root = graph.replace(NodeId(4), NodeId(1), NodeId(2)).unwrap();
+    assert_eq!(graph.node(NodeId(5)), &unary("c", 2));
+    assert_eq!(graph.node(new_root), &binary("b", 2, 5));
+    assert_eq!(graph.node(NodeId(2)), &unary("u", 1));
+}
+
+/// A fresh replacement, appended but not yet live, behaves as before: every use of
+/// the target on the path is redirected to it.
+#[test]
+fn a_fresh_replacement_takes_every_use() {
+    let mut graph = graph(vec![
+        open("obs"),
+        unary("project", 0),
+        unary("u", 1),
+        binary("b", 1, 2),
+    ]);
+    let fresh = graph.append(unary("select", 1)).unwrap();
+    let new_root = graph.replace(NodeId(3), NodeId(1), fresh).unwrap();
+    assert_eq!(graph.node(NodeId(5)), &unary("u", 4));
+    assert_eq!(graph.node(new_root), &binary("b", 4, 5));
 }

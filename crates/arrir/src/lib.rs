@@ -12,5 +12,5 @@ mod wire;
 #[cfg(test)]
 mod plan_tests;
 
-pub use plan::{Arity, Graph, Node, NodeId, Operation, Plan, PlanError};
+pub use plan::{Arity, Graph, Node, NodeId, Operation, Plan, PlanError, RewriteError};
 pub use wire::{ImportError, WIRE_VERSION};

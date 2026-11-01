@@ -2,7 +2,8 @@
 
 Status: decided 1 November 2026, for issue #27 (proposed 31 October). It replaces the
 "start with linear unary chains" decision in [design.md](design.md#decisions). The arena,
-structural validation and wire form are implemented in `crates/arrir` (#28, PR #59).
+structural validation and wire form are implemented in `crates/arrir` (#28, PR #59), and
+rewrites as `Graph::replace(root, target, replacement)`, which returns the new root.
 
 ## Why a chain isn't enough
 
@@ -172,7 +173,15 @@ untouched, so:
 
 **Path copying.** Because nodes can't change, rewriting a node below the root means
 re-appending every node on the path from it up to the root, each pointing at its
-replaced input. Nodes off that path are reused as they are. See
+replaced input. Nodes off that path are reused as they are. In `arrir` this is
+`Graph::replace(root, target, replacement)`: the caller appends the replacement first,
+and every live node that reads `target`, directly or indirectly, is copied with each
+use of `target` substituted. The replacement is exempt, as in MLIR's
+`replaceAllUsesExcept` (decided by Charles, 2 November 2026): it is never copied, and
+neither is a node the root reaches only through it. Replacing `X` with an already-live
+`U(X)` in `B(X, U(X))` gives `B(U(X), U(X))`. A node also reached by another path is
+copied for that path: in `B(U(X), C(X))`, `C` becomes `C(U(X))`.
+The result isn't re-validated; callers validate the new root. See
 [Rewriting below the root](#rewriting-below-the-root).
 
 The arena therefore grows with every rewrite, so any termination measure applies to the

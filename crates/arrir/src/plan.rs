@@ -121,6 +121,15 @@ pub enum PlanError {
     },
 }
 
+/// Why a rewrite can't be made. Structural errors stay in [`PlanError`].
+#[derive(Clone, Debug, PartialEq, Eq, Error)]
+pub enum RewriteError {
+    #[error("node {0:?} isn't in the graph")]
+    NotInGraph(NodeId),
+    #[error("node {0:?} isn't reachable from the root, so replacing it changes nothing")]
+    TargetNotLive(NodeId),
+}
+
 /// The node arena. The field is private, so nodes can be added but never changed or
 /// removed (rule 1).
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -180,6 +189,92 @@ impl Graph {
             }
         }
         live
+    }
+
+    /// Like `live_nodes`, but stops at `stop`: `stop` is marked, and its inputs are
+    /// marked only if the root reaches them by another path.
+    fn nodes_reached_without(&self, root: NodeId, stop: NodeId) -> Vec<bool> {
+        let mut reached = vec![false; self.nodes.len()];
+        reached[root.index()] = true;
+        for index in (0..=root.index()).rev() {
+            if reached[index] && index != stop.index() {
+                for input in &self.nodes[index].inputs {
+                    reached[input.index()] = true;
+                }
+            }
+        }
+        reached
+    }
+
+    /// Replaces `target` with `replacement` in the plan rooted at `root`, and returns
+    /// the new root (`plans/dag.md`, "Rewrites keep old IDs and roots"). The caller appends the replacement
+    /// nodes first. Every live node that depends on `target`, directly or through
+    /// other nodes, is appended again with its inputs updated (path copying); every
+    /// other node is reused. No existing node changes, so `root` still names the
+    /// unrewritten plan.
+    ///
+    /// `replacement` is exempt, as in MLIR's `replaceAllUsesExcept`: it is never
+    /// copied, and neither is a node that the root reaches only through it. So
+    /// replacing `X` with an already-live `U(X)` in `B(X, U(X))` gives `B(U(X), U(X))`.
+    /// A node the root also reaches by another path is copied for that path. In
+    /// `B(U(X), C(X))` with replacement `U(X)`, `C` is copied to `C(U(X))` and `U(X)`
+    /// stays as it is. Replacing a node with itself returns `root` unchanged.
+    ///
+    /// Fails if `root`, `target` or `replacement` isn't in the graph. Replacing an
+    /// unreachable target is an error.
+    ///
+    /// The result isn't re-validated: the copies can make two live `Open`s of one
+    /// binding (rule 6). Callers run `Plan::new` or `Plan::validate` on the new root.
+    // TODO(first real operation): remove this `allow`. Outside tests `Operation` has no
+    // values yet, so the compiler sees that the copy below can never be made and warns.
+    #[cfg_attr(not(test), allow(unreachable_code, unused_variables, unused_mut))]
+    pub fn replace(
+        &mut self,
+        root: NodeId,
+        target: NodeId,
+        replacement: NodeId,
+    ) -> Result<NodeId, RewriteError> {
+        for id in [root, target, replacement] {
+            if id.index() >= self.nodes.len() {
+                return Err(RewriteError::NotInGraph(id));
+            }
+        }
+        let live = self.live_nodes(root);
+        if !live[target.index()] {
+            return Err(RewriteError::TargetNotLive(target));
+        }
+        if replacement == target {
+            return Ok(root);
+        }
+        // Which nodes the root reaches without passing through `replacement`. Only
+        // these are copied, so `replacement` and anything reached only through it keep
+        // their inputs. This covers the graph as it was, so the copies appended below
+        // are skipped.
+        let reached = self.nodes_reached_without(root, replacement);
+        // Maps each replaced or copied node to the node that now stands for it.
+        let mut replaced: BTreeMap<NodeId, NodeId> = BTreeMap::new();
+        replaced.insert(target, replacement);
+        // Only nodes after `target` can depend on it.
+        for (index, &is_reached) in reached.iter().enumerate() {
+            if index <= target.index() || !is_reached || index == replacement.index() {
+                continue;
+            }
+            let node = &self.nodes[index];
+            if !node.inputs.iter().any(|i| replaced.contains_key(i)) {
+                continue;
+            }
+            let mut copy = node.clone();
+            for input in copy.inputs.iter_mut() {
+                if let Some(&new_input) = replaced.get(input) {
+                    *input = new_input;
+                }
+            }
+            let new_id = self
+                .append(copy)
+                .expect("a copy's inputs are existing nodes, so it is valid");
+            replaced.insert(NodeId(index as u32), new_id);
+        }
+        Ok(*replaced.get(&root).unwrap_or(&root))
     }
 }
 
