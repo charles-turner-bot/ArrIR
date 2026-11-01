@@ -117,7 +117,7 @@ Proposed on 28 October, designed in [grids.md](grids.md):
   explicit: the resampling method and empty-cell value for each variable, the edge
   rule, the cells' edge shape and the transformer's error threshold. Resampling methods
   are defined in ArrIR, not by any adapter.
-- **`Cast` is an operation** ([cast.md](cast.md)), proposed and revised by #38. It
+- **`Cast` is an operation** ([cast.md](cast.md)), revised by #38 and decided 1 November. It
   converts an array, or listed variables of a dataset, to another type, with rounding,
   out-of-range handling and missing-value encoding stated. `Warp`
   doesn't convert types; an adapter whose engine does both emits the pair as one call.
