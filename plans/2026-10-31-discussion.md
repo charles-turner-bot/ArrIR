@@ -38,7 +38,21 @@ Details in [dag.md](dag.md). All pending review.
   #15 nor #26 set ID scope, and the review of #26 deferred it here. A shared dimension
   name asserts one axis, not matching labels or extents.
 
+## Symbolic shapes (#29)
+
+Details in [shapes.md](shapes.md). All pending review.
+
+- **Unknown extents get identities.** `Extent` gains `Symbolic`. Hosts still declare
+  `Unknown`; inference turns each one into a symbol, so `a + a` is provably compatible
+  without knowing `a`'s length.
+- **Broadcasting follows the Array API**, aligned from the last axis, and aligned axes
+  must share a `DimId`. Named broadcasting stays with #34.
+- **Unresolved isn't an error.** A pair that can't be proven compatible records a
+  requirement that the host checks at bind time. Only a contradiction between known
+  extents fails at inference.
+- **No Broadcast node and no constraint solver** for now.
+
 ## Not settled
 
-The questions at the end of [dag.md](dag.md), and the rewrite termination
-measure for graphs, which goes to #37.
+The questions at the end of [dag.md](dag.md) and [shapes.md](shapes.md), and the
+rewrite termination measure for graphs, which goes to #37.
