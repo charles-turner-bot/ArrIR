@@ -72,9 +72,9 @@ elementwise family. Operations hold their options; nodes hold the edges. A node'
 its position, so it isn't stored in the node. Array data is never embedded: inputs are
 other nodes, and *external* data enters only through `Open` (and, until [question
 7](#questions-for-review) is settled, `Warp`'s `GeometryBinding`). A literal scalar,
-such as the `2` in `a * 2`, is a zero-input node with no binding. #47 proposes it as
-`Constant(Scalar)`, with the operation defined in #32 and its wire form following #26's
-scalar encoding. This contract only allows such nodes; it doesn't decide them.
+such as the `2` in `a * 2`, is a zero-input node with no binding. A zero-input literal
+node is proposed in #47 (dtypes.md). This contract only allows such nodes; it doesn't
+decide them.
 
 **Who owns the nodes.** A `Graph` owns them. A rewrite takes `&mut Graph` and a root,
 appends to the graph in place, and returns a new root. No existing node is changed or
@@ -99,7 +99,7 @@ pairs the graph with the one root being exported or executed.
    }
    ```
 
-   `Open` is `Exactly(0)`, as is a literal scalar node (#47). `Project`, `Cast` and an
+   `Open` is `Exactly(0)`, as is a literal node (#47, dtypes.md). `Project`, `Cast` and an
    unweighted `Reduce` are `Exactly(1)`; a weighted `Reduce` is `Exactly(2)`, its
    weights being the second input. A `Select` takes one input plus one per array-valued
    indexer, such as a computed mask (#36). A binary elementwise function is
