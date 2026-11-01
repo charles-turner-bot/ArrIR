@@ -38,7 +38,33 @@ Details in [dag.md](dag.md). All pending review.
   #15 nor #26 set ID scope, and the review of #26 deferred it here. A shared dimension
   name asserts one axis, not matching labels or extents.
 
+## Symbolic shapes (#29)
+
+Details in [shapes.md](shapes.md). All pending review.
+
+- **Unknown extents get identities.** `Extent` gains `Symbolic`. Hosts still declare
+  `Unknown`; inference turns each one into a size symbol, so `a + a` is provably
+  compatible without knowing `a`'s length.
+- **Size symbols are identified by structure,** not by node, so the same slice of the
+  same extent is one size symbol and pushdown keeps its proofs. Mask counts and label
+  selections are keyed by value numbering, which never merges nodes.
+- **Axes are named or positional.** An axis is `Named(DimId)` or `Positional`; a
+  positional axis has no stored ID and is identified by its position from the end.
+- **Only positional axes stretch.** Positional shapes broadcast by the Array API.
+  Named shapes align by name, as xarray 2026.9.0 does without coordinates: shared dims
+  must have equal extents, a dim on one side only is created on the other, and the
+  output takes the first operand's dims then the new ones. A positional operand adopts
+  a named operand's names but may not stretch a named length-1 axis. Decided by
+  Charles, 1 November, after xarray experiments. Named shapes therefore need no
+  `expand_dims`. Coordinate label alignment stays with #34. Whether any Broadcast node
+  is needed is still a recommendation (no).
+- **Unresolved isn't an error.** A pair that can't be proven compatible records a
+  requirement. The core checks it when its facts arrive: at bind, at label resolution
+  or at execution. Rewrites must keep the requirement set's meaning, compared as
+  unordered pairs.
+- **No Broadcast node and no constraint solver** for now.
+
 ## Not settled
 
-The questions at the end of [dag.md](dag.md), and the rewrite termination
-measure for graphs, which goes to #37.
+The questions at the end of [dag.md](dag.md) and [shapes.md](shapes.md), and the
+rewrite termination measure for graphs, which goes to #37.

@@ -193,8 +193,10 @@ From #16, for positional semantics:
   whose indexing drops length-1 results (R's `drop = TRUE`) lowers those to scalar
   indexers.
 - A positional mask must match the dimension length exactly. There is no recycling.
-- Label selections have unknown extent until they are resolved.
-- Broadcasting follows the 1 November decision [above](#decisions).
+- Label selections have unknown extent until they are resolved. In derived shapes that
+  unknown is a size symbol with an identity (proposed in [shapes.md](shapes.md)).
+- Broadcasting follows the 1 November decision [above](#decisions), detailed in
+  [shapes.md](shapes.md#broadcasting).
 
 ## What to extract
 
