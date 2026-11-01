@@ -173,7 +173,12 @@ untouched, so:
 
 **Path copying.** Because nodes can't change, rewriting a node below the root means
 re-appending every node on the path from it up to the root, each pointing at its
-replaced input. Nodes off that path are reused as they are. See
+replaced input. Nodes off that path are reused as they are. In `arrir` this is
+`Graph::replace(root, target, replacement)`: the caller appends the replacement first,
+and every live node that reads `target`, directly or indirectly, is copied with each
+use of `target` substituted. That includes a live replacement's own dependants:
+replacing `X` with an already-live `U(X)` in `B(X, U(X))` gives `B(U(X), U(U(X)))`.
+The result isn't re-validated; callers validate the new root. See
 [Rewriting below the root](#rewriting-below-the-root).
 
 The arena therefore grows with every rewrite, so any termination measure applies to the

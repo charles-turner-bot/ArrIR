@@ -192,7 +192,7 @@ impl Graph {
     }
 
     /// Replaces `target` with `replacement` in the plan rooted at `root`, and returns
-    /// the new root (`plans/dag.md`, "Rewrites"). The caller appends the replacement
+    /// the new root (`plans/dag.md`, "Rewrites keep old IDs and roots"). The caller appends the replacement
     /// nodes first. Every live node that depends on `target`, directly or through
     /// other nodes, is appended again with its inputs updated (path copying); every
     /// other node is reused. No existing node changes, so `root` still names the
@@ -202,10 +202,13 @@ impl Graph {
     /// inside `replacement`'s own dependants: replacing 1 with 2 in `B(1, U(1))`
     /// gives `B(2, U(2))`. Replacing a node with itself returns `root` unchanged.
     ///
-    /// Fails if `root`, `target` or `replacement` isn't in the graph, or if `target`
-    /// isn't live from `root`, so a rewrite that would change nothing is an error.
-    // Outside tests `Operation` has no values yet, so the compiler sees that the copy
-    // below can never be made and warns. The `allow` goes with the first real operation.
+    /// Fails if `root`, `target` or `replacement` isn't in the graph. Replacing an
+    /// unreachable target is an error.
+    ///
+    /// The result isn't re-validated: the copies can make two live `Open`s of one
+    /// binding (rule 6). Callers run `Plan::new` or `Plan::validate` on the new root.
+    // TODO(first real operation): remove this `allow`. Outside tests `Operation` has no
+    // values yet, so the compiler sees that the copy below can never be made and warns.
     #[cfg_attr(not(test), allow(unreachable_code, unused_variables, unused_mut))]
     pub fn replace(
         &mut self,
