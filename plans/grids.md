@@ -520,8 +520,10 @@ So the rules are known before the variants exist:
   `ProjectError::GridCoordinateOutsidePayload` ([dag.md](dag.md)). This covers every
   grid kind, `Affine` included. MOM6's `ds["u"]` on `(yh, xq)` is rejected for now:
   xarray keeps only `geolon_u` and drops `geolon` on `(yh, xh)` and `geolon_c` on
-  `(yq, xq)` (checked). `Project::Dataset` of `u` keeps the grid. A later loosening
-  could instead drop the placement and give `Ungridded`.
+  `(yq, xq)` (checked). `Project::Dataset` of `u` keeps the grid. The intended
+  behaviour is for the `Array` to keep its grid (Charles, 2 November 2026); how to
+  represent that is #63. Until then it is rejected, not dropped to `Ungridded`, so
+  plans that work now won't change output when #63 lands.
 - **`Reduce`** over a grid dimension removes every placement on that grid, as a scalar
   does, with or without `keepdims` (decision K).
 - **`Rename`** of a grid dimension renames it in the grid and in every placement.
@@ -693,7 +695,8 @@ recommendations, after an independent review. Q numbers are the earlier question
 - **A. Affine `Select` changes integer index maps,** and only adapters compute `f64`.
 - **B. `Project::Array`** keeps a grid only when the payload spans its centre
   dimensions, dropping model entries outside the payload. Otherwise it rejects
-  (`GridCoordinateOutsidePayload`); dropping to `Ungridded` is a possible loosening.
+  (`GridCoordinateOutsidePayload`). The intended behaviour is to keep the grid; its
+  representation is #63.
 - **C. A grid with no data variable placed on it is removed,** for every operation.
 - **D. A label on a grid's dimension** makes the grid's placements `Unresolved` and
   removes the grid until label resolution.
