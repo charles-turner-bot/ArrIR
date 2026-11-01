@@ -318,7 +318,7 @@ A plan that needs the precision states it:
 One node accumulates in `f64` and returns `f32`. No `Cast` comes before it, because
 `f32` to `f64` is exact. The final quotient is narrowed by cast.md's rule: rounding to
 nearest, ties to even, and overflowing to infinity as NumPy does
-([cast.md](cast.md#definitions)).
+([cast.md](cast.md#conversion-matrix)).
 
 **Adapters map the node to one host expression or reject it.** The xarray adapter emits
 `x.mean("time", dtype="float64").astype("float32")`, since NumPy's `astype` matches

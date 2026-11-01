@@ -387,11 +387,14 @@ Questions 1 to 5 are answered, from GDAL's source and from tests in rwarp
 3. **Kernel widening.** `XSCALE=1` and `YSCALE=1` turn it off. Bilinear and cubic only
    widen once the factor is 0.5 or less. The automatic factor varies between chunks
    (osgeo-upstream#50), which is why the plan states it.
-4. **Rounding.** With an integer working type, gdalwarp clamps, then rounds half up
-   (`Rounding::NearestTiesUp`). With a float working type, it converts at the end,
-   rounding half away from zero, with NaN becoming 0. A result equal to the nodata
-   value is moved off it, which on the float path can be undone by the rounding. These
-   rules are what [`Cast`](cast.md) has to express.
+4. **Rounding.** With an integer working type, gdalwarp clamps, then rounds an
+   interpolating kernel's result half up (`Rounding::NearestTiesUp`), but it converts
+   the source into the working type rounding half away from zero. With a float working
+   type, it converts at the end, rounding half away from zero, with NaN becoming 0. A
+   result equal to the nodata value is moved off it, which on the float path can be
+   undone by the rounding. These rules are what [`Cast`](cast.md) has to express; the
+   rounding rules were checked with GDAL 3.13.3 on 1 November
+   ([cast.md](cast.md#what-gdalwarp-can-emit)).
 5. **The layout's `fill`.** It doesn't count as missing. See
    [Missing values](#missing-values).
 
