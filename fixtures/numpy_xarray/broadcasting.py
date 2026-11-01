@@ -39,7 +39,7 @@ raises("da(x: 3) + nd(3, 3): PositionalOutranksNamed", lambda: named(x=3) + np.o
 raises("da + nd(2,): IncompatibleExtents", lambda: da + np.ones(2), ValueError)
 
 # Named with named: no length-1 stretching, order is first operand then new dims.
-raises("named(y: 1) + named(y: 2)", lambda: named(y=1) + named(y=2), ValueError)
+raises("named(y: 1) + named(y: 2)", lambda: named(y=1) + named(y=2), xr.AlignmentError)
 check("named(x: 3) + named(y: 2, x: 3) order", (named(x=3) + named(y=2, x=3)).dims, ("x", "y"))
 
 # n-ary: xr.where.
@@ -51,6 +51,21 @@ check("where(cond, x, yx)", xr.where(cond, x, yx).dims, ("x", "y"))
 raises("where(cond, nd(2, 3), yx)", lambda: xr.where(cond, np.ones((2, 3)), yx), ValueError)
 raises("where(nd_bool(3,), x, yx)", lambda: xr.where(np.ones(3, bool), x, yx), ValueError)
 raises("where(cond, x, nd(2, 3))", lambda: xr.where(cond, x, np.ones((2, 3))), ValueError)
+
+# Stage 1 is stable under regrouping: (a + b) + c and a + (b + c) give one order.
+a, b, c = named(x=3), named(y=2), named(z=4, x=3)
+check("(a + b) + c order", ((a + b) + c).dims, ("x", "y", "z"))
+check("a + (b + c) order", (a + (b + c)).dims, ("x", "y", "z"))
+
+# A positional operand p(3,) aligns with the last axis of the combined named order
+# (x, y), whatever its position among the operands. Each condition selects p.
+xa, ya = named(x=3), named(y=3)
+pos = np.arange(3.0)
+picks_p_second = xr.where(xa < 0, ya, pos)  # condition all false: takes pos
+picks_p_first = xr.where(xa > 0, pos, ya)  # condition all true: takes pos
+for label, r in {"where(x, y, p)": picks_p_second, "where(x, p, y)": picks_p_first}.items():
+    check(f"{label}: dims", r.dims, ("x", "y"))
+    check(f"{label}: p runs along y", r.isel(x=0).values.tolist(), [0.0, 1.0, 2.0])
 
 # Deliberate difference: xarray stretches a named length-1 axis to fit a
 # positional operand and leaves its coordinate at length 1.

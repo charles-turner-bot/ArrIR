@@ -40,6 +40,10 @@ raises("da.isel(x=5)", lambda: da.isel(x=5), IndexError)
 raises("da.isel(x=[0, 9])", lambda: da.isel(x=[0, 9]), IndexError)
 raises("nd[[0, 9]]", lambda: nd[[0, 9]], IndexError)
 
+# Position lists keep repeats; an empty list gives extent 0.
+check("repeats kept: x=[2, 2, 0]", da.isel(x=[2, 2, 0]).values[0].tolist(), [2, 2, 0])
+check("empty list: x=[]", dict(da.isel(x=[]).sizes), {"y": 3, "x": 0})
+
 # Orthogonal (xarray lists, np.ix_) versus pointwise (NumPy advanced indexing).
 r = da.isel(y=[0, 2], x=[1, 3])
 check("orthogonal lists: dims", r.dims, ("y", "x"))
@@ -71,11 +75,14 @@ check("coupled indexer gathers along y", (r.dims, r.values.tolist()), (("y",), [
 
 # Masks.
 check("orthogonal bool mask", da.isel(x=np.array([True, False, True, False])).sizes, {"y": 3, "x": 2})
+bool_on_p = xr.DataArray([True, False, True], dims="p")
+raises("Boolean indexer on another dim (BoolInPointwise)", lambda: da3.isel(b=bool_on_p), IndexError)
 raises("2-D mask on a DataArray", lambda: da[np.ones((3, 4), bool)], IndexError)
 check("2-D mask on NumPy is row-major 1-D", nd[nd % 2 == 0].tolist(), [0, 2, 4, 6, 8, 10])
 
 # Merging selections is not exact for every length (pushdown rule 3).
 raises("x[-5:][[3]] at length 3", lambda: np.arange(3)[-5:][[3]], IndexError)
 check("x[-5:][[3]] at length 8", np.arange(8)[-5:][[3]].tolist(), [6])
+raises("x[0:2][[3]] raises", lambda: np.arange(8)[0:2][[3]], IndexError)
 
 finish()

@@ -9,7 +9,6 @@ only. Verified with NumPy 2.5.4, xarray 2026.9.0 and dask 2026.8.0 on macOS arm6
 """
 
 import os
-import platform
 import sys
 import warnings
 
@@ -20,15 +19,23 @@ import dask.array as da_
 import numpy as np
 import xarray as xr
 
-from _check import check, finish, header, raises
+from _check import check, finish, header, on_macos_arm64, raises
 
 header(np, xr, dask)
 warnings.simplefilter("ignore", RuntimeWarning)
 
 i8 = np.int8
 
-# Integers wrap.
-check("int8 127 + 1", int(np.array([127], i8)[0] + i8(1)), -128)
+# Integers wrap, on the array code path (NumPy scalars take a separate path).
+def i8_array(value):
+    return np.array([value], i8)
+
+
+check("int8 127 + 1", int((i8_array(127) + i8(1))[0]), -128)
+check("int8 -128 - 1", int((i8_array(-128) - i8(1))[0]), 127)
+check("int8 64 * 2", int((i8_array(64) * i8(2))[0]), -128)
+check("-(int8 -128)", int(np.negative(i8_array(-128))[0]), -128)
+check("square(int8 16)", int(np.square(i8_array(16))[0]), 0)
 check("abs(int8 -128)", int(np.abs(np.array([-128], i8))[0]), -128)
 check("int8 -128 // -1", int((np.array([-128], i8) // np.array([-1], i8))[0]), -128)
 check("int8 -128 % -1", int((np.array([-128], i8) % np.array([-1], i8))[0]), 0)
@@ -40,8 +47,9 @@ check("(i8 127 + i8 1) + i16 0", int(((a + b) + c)[0]), -128)
 check("i8 127 + (i8 1 + i16 0)", int((a + (b + c))[0]), 128)
 
 # Integer floor division and remainder.
-check("-7 // 2", int(np.int32(-7) // np.int32(2)), -4)
-check("-7 % 2", int(np.int32(-7) % np.int32(2)), 1)
+minus7, two = np.array([-7], np.int32), np.array([2], np.int32)
+check("-7 // 2", int((minus7 // two)[0]), -4)
+check("-7 % 2", int((minus7 % two)[0]), 1)
 num = np.array([7, -7, 0], np.int32)
 zero = np.zeros(3, np.int32)
 check("NumPy x // 0 is 0", (num // zero).tolist(), [0, 0, 0])
@@ -69,21 +77,28 @@ nan_one = xr.DataArray([np.nan, 1.0])
 check("[nan, 1] > 0", (nan_one > 0).values.tolist(), [False, True])
 check("[nan, 1] != 0", (nan_one != 0).values.tolist(), [True, True])
 
+# maximum and minimum propagate NaN from either argument (lowering to Maximum/Minimum).
+nan, one = np.array([np.nan]), np.array([1.0])
+check("maximum(nan, 1) is NaN", bool(np.isnan(np.maximum(nan, one))[0]), True)
+check("maximum(1, nan) is NaN", bool(np.isnan(np.maximum(one, nan))[0]), True)
+check("minimum(nan, 1) is NaN", bool(np.isnan(np.minimum(nan, one))[0]), True)
+check("minimum(1, nan) is NaN", bool(np.isnan(np.minimum(one, nan))[0]), True)
+
 # Rounding functions.
 check("ceil keeps integer dtype", np.ceil(np.array([3], np.int32)).dtype.name, "int32")
 check("round is half to even", np.round(np.array([0.5, 1.5, 2.5])).tolist(), [0.0, 2.0, 2.0])
 check("sign(-0.0) is +0", bool(np.signbit(np.sign(np.float64(-0.0)))), False)
 
-# Signed zeros in maximum/minimum: implementation-defined, recorded for arm64.
-if platform.machine() in ("arm64", "aarch64"):
+# Signed zeros in maximum/minimum: implementation-defined, recorded on macOS arm64.
+if on_macos_arm64():
     pz, nz = np.zeros(64), -np.zeros(64)
-    for size in (1, 8, 64):
+    for size in range(1, 65):
         check(f"arm64 maximum(-0, +0) is +0, size {size}", bool(np.signbit(np.maximum(nz[:size], pz[:size])).any()), False)
         check(f"arm64 maximum(+0, -0) is +0, size {size}", bool(np.signbit(np.maximum(pz[:size], nz[:size])).any()), False)
         check(f"arm64 minimum(+0, -0) is -0, size {size}", bool(np.signbit(np.minimum(pz[:size], nz[:size])).all()), True)
         check(f"arm64 minimum(-0, +0) is -0, size {size}", bool(np.signbit(np.minimum(nz[:size], pz[:size])).all()), True)
 else:
-    print(f"skip  signed zeros: recorded for arm64, this is {platform.machine()}")
+    print("skip  signed zeros: recorded on macOS arm64 only")
 
 # xarray result names: ArrIR's rule differs, so lowering renames.
 ds = xr.Dataset({"t": ("x", [1.0, 2.0]), "u": ("x", [3.0, 4.0])}, coords={"x": [0, 1]})
@@ -100,5 +115,12 @@ def aux(values):
 
 check("equal aux coordinate kept", "lon" in (aux([5, 6]) + aux([5, 6])).coords, True)
 check("conflicting aux coordinate dropped", "lon" in (aux([5, 6]) + aux([5, 7])).coords, False)
+
+# Arithmetic on a coordinate payload (CoordinatePayload in ArrIR).
+coords = xr.Dataset({"v": ("x", [1.0, 2.0, 3.0])}, coords={"x": [10, 20, 30]})
+shifted = coords.x + 1
+check("ds.x + 1: payload named x", (shifted.name, shifted.values.tolist()), ("x", [11, 21, 31]))
+check("ds.x + 1: coordinate x unchanged", shifted["x"].values.tolist(), [10, 20, 30])
+raises("ds.x + 1: to_dataset", lambda: shifted.to_dataset(), ValueError)
 
 finish()

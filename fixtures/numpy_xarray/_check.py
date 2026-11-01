@@ -8,7 +8,12 @@ FAILURES = []
 
 def header(*modules):
     names = ", ".join(f"{m.__name__} {m.__version__}" for m in modules)
-    print(f"{names}; Python {platform.python_version()}; {platform.machine()}")
+    print(f"{names}; Python {platform.python_version()}; {platform.system()} {platform.machine()}")
+
+
+def on_macos_arm64():
+    """True where the platform-dependent values were recorded: macOS on Apple silicon."""
+    return platform.system() == "Darwin" and platform.machine() == "arm64"
 
 
 def check(label, actual, expected):
