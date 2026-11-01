@@ -116,6 +116,14 @@ Proposed on 28 October, designed in [grids.md](grids.md):
 - **The GDAL adapter renders VRT text** ([gdal-adapter.md](gdal-adapter.md)). It does no
   I/O and doesn't link GDAL, and it rejects what GDAL can't do exactly.
 
+Decided by Charles on 1 November 2026, detailed in `shapes.md` (#46):
+
+- **Broadcasting.** An axis is named or positional, and only positional axes stretch
+  (length 1). Named shapes align by name: a dimension on both operands needs equal
+  extents, and a dimension on one side only is broadcast, not stretched. A positional
+  operand adopts a named operand's names but never stretches a named axis. Positional
+  shapes follow the Array API rules. #34 handles coordinate label alignment only.
+
 ## Architecture
 
 Three kinds of thing are involved, and they are generic at different levels:
@@ -186,6 +194,7 @@ From #16, for positional semantics:
   indexers.
 - A positional mask must match the dimension length exactly. There is no recycling.
 - Label selections have unknown extent until they are resolved.
+- Broadcasting follows the 1 November decision [above](#decisions).
 
 ## What to extract
 
@@ -267,7 +276,12 @@ do not omit a semantic field or its tests to satisfy the line count.
    but before any physical planning. Until an operation has one, it can't be physically
    planned. `Warp` follows in its own PR, as in [warp.md](warp.md).
 7. Schema propagation along the chain (through the graph, if dag.md is approved), and
-   unknown-fact handling.
+   unknown-fact handling. Proposed, after the graph in step 6, in this order:
+   - symbolic shape inference: design #29 (`shapes.md`, #46), implementation #2;
+   - dtype inference and reduction accumulation: design #30 (`dtypes.md`, #47),
+     implementation #31;
+   - the first elementwise operations, `Add`, `Multiply` and `GreaterThan`: design #32,
+     implementation #33, using both of the above.
 8. An xrexpr adapter for this subset, first with import/export round-trip tests. Then a
    GDAL adapter for `Open`, positional `Select` and `Warp`, tested against `gdal.Warp`
    through `gdalxarray`, as in [gdal-adapter.md](gdal-adapter.md).
