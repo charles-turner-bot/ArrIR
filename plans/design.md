@@ -1,14 +1,18 @@
 # ArrIR: extraction contract
 
 Status: agreed direction, amended 2026-10-27 (see
-[the 27 October discussion](2026-10-27-discussion.md)). Implementation proceeds in the
+[the 27 October discussion](2026-10-27-discussion.md)). The 28 October amendments are
+proposed (see [the 28 October discussion](2026-10-28-discussion.md)). The plan graph,
+shape and dtype amendments were decided on 1 November (see
+[the 31 October discussion](2026-10-31-discussion.md)). Implementation proceeds in the
 small steps below.
 
 ## Purpose
 
 Extract the semantic IR that xrexpr developed to make its optimiser sound.
 The same representation must support both shared rewrites and translation between
-named-array implementations, initially xrexpr/xarray and xarray-ts.
+named-array implementations, initially xrexpr/xarray and xarray-ts, and lowering to
+GDAL.
 
 ```text
 host calls -> host lowering -> ArrIR -> optional rewrites -> target adapter
@@ -44,7 +48,10 @@ so that it agrees with the label rule below.
 
 ## Decisions
 
-- Start with linear unary chains, not a speculative graph.
+- A plan is an append-only DAG of nodes with ordered inputs and one root, as in
+  [dag.md](dag.md). *Decided 1 November; this replaces the original "start with linear
+  unary chains" decision.* A chain is the special case, so the first vertical slice
+  keeps its content.
 - Extract xrexpr's **lowered** operations, not its fluent call recorder.
   `ContextOpen` belongs in host lowering; contextual reductions are semantic nodes.
 - Keep one semantic algebra. Rewrites consume it, not a competing optimiser IR.
@@ -52,6 +59,14 @@ so that it agrees with the label rule below.
   numerically relaxed rewrites require explicit permission. Strictness does not
   imply that unrelated execution engines already guarantee bitwise equality;
   adapters must expose or reject unsupported numerical requirements.
+  *Decided 1 November:* a reduction declares its order, either
+  `Sequential` (strict) or `Unspecified`, which is a relaxation that lowering writes
+  explicitly. Rewrites that split or merge reductions need `Unspecified`
+  ([dtypes.md](dtypes.md#order)).
+- *Decided 1 November:* ArrIR promotes dtypes implicitly only where
+  the conversion is exact, following Array API 2025.12. Every value-changing conversion
+  is a `Cast` that lowering inserts, and a reduction states its accumulator, result and
+  order ([dtypes.md](dtypes.md)).
 - Support external arrays through explicit binding IDs and declared metadata.
   A binding is not an embedded array, a Python pointer, or a download instruction.
   Importing a plan never executes or resolves it automatically.
@@ -63,11 +78,14 @@ so that it agrees with the label rule below.
 
 Added on 27 October:
 
-- **A plan names its data by binding, not location.** Every plan starts with
-  `Open { binding: BindingId, schema }`: a local name and the declared schema of the
-  dataset it binds. Mapping the binding to a URI, a byte-ref table or an in-memory array
-  happens outside the plan. A plan therefore validates offline and never fetches
-  anything when imported.
+- **A plan names its data by binding, not location.** External data enters a plan only
+  through `Open { binding: BindingId, schema }`: a local name and the declared schema of
+  the dataset it binds. *Decided with [dag.md](dag.md) on 1 November; this replaces
+  "every plan starts with `Open`", which is chain wording. `Warp`'s target geometry
+  becomes an `Open` input (dag.md question 7). A literal scalar is a zero-input
+  `Constant` node with no binding ([dtypes.md](dtypes.md)).* Mapping the binding to
+  a URI, a byte-ref table or an in-memory array happens outside the plan. A plan
+  therefore validates offline and never fetches anything when imported.
 - **`Open` binds a dataset, not one variable,** because the logical schema is
   dataset-level, as in xrexpr. Choosing a variable is a projection.
 - **Label selection is logical. Resolving it is not.** A label `Select` is representable
@@ -79,6 +97,43 @@ Added on 27 October:
   byterefs decision records, not through ArrIR.
 - **Components form a dependency graph, not a sequence of layers** (see
   [Architecture](#architecture)).
+
+Proposed on 28 October, designed in [grids.md](grids.md):
+
+- **GDAL is a target.** A plan must be able to lower to GDAL VRT, not only to
+  xarray-shaped hosts. That needs grids in the schema, `Select` effects on grids, a
+  `Warp` operation and a GDAL adapter, proposed in that order as stacked PRs.
+- **Grids are schema entities.** A grid owns its dimensions, the CRS, the pixel
+  interpretation and a declared coordinate model (affine, rectilinear or curvilinear).
+  Spatial variables, and their coordinate variables, refer to a grid.
+- **Staggering is part of the schema from the start.** Each gridded variable records its
+  position on each axis, so A, B and C grids are all representable. Cell bounds are the
+  coordinates at the `Outer` position.
+- **The design is not GDAL-shaped.** Grid kinds beyond 2-D rasters (meshes, discrete
+  global grids, N-D grids) are sketched in grids.md, so adding them is a new variant,
+  not a change. Each grid concept is checked against at least one non-GDAL
+  implementation (xgcm, SGRID, uxarray, xdggs) before it's agreed.
+- **`Warp` is an operation** ([warp.md](warp.md)), with every result-affecting option
+  explicit: the resampling method and empty-cell value for each variable, the edge
+  rule, the cells' edge shape and the transformer's error threshold. Resampling methods
+  are defined in ArrIR, not by any adapter.
+- **`Cast` is an operation** ([cast.md](cast.md)), revised by #38 and decided 1 November. It
+  converts an array, or listed variables of a dataset, to another type, with rounding,
+  out-of-range handling and missing-value encoding stated. `Warp`
+  doesn't convert types; an adapter whose engine does both emits the pair as one call.
+- **An enum variant with options holds a named struct** (`Conservative(ConservativeOptions)`),
+  so each set of options has its own `impl` for validation. Fields are grouped into a
+  struct only when they describe one thing.
+- **The GDAL adapter renders VRT text** ([gdal-adapter.md](gdal-adapter.md)). It does no
+  I/O and doesn't link GDAL, and it rejects what GDAL can't do exactly.
+
+Decided by Charles on 1 November 2026, detailed in `shapes.md` (#46):
+
+- **Broadcasting.** An axis is named or positional, and only positional axes stretch
+  (length 1). Named shapes align by name: a dimension on both operands needs equal
+  extents, and a dimension on one side only is broadcast, not stretched. A positional
+  operand adopts a named operand's names but never stretches a named axis. Positional
+  shapes follow the Array API rules. #34 handles coordinate label alignment only.
 
 ## Architecture
 
@@ -96,7 +151,7 @@ plan, but the table only describes what exists. A physical planner combines a lo
 plan with a storage layout to produce a physical plan.
 
 mdim-refs calls its placement layer "the plan". In ArrIR, *plan* always means the logical
-chain, and that layer is called *placements*.
+graph ([dag.md](dag.md)), and that layer is called *placements*.
 
 ### Dependency graph
 
@@ -114,7 +169,7 @@ coupled to everything built before it.
    footprints
      /         \                                 |
 arrir-logical   adapters                         |
-rewrites        xrexpr, xarray-ts, ...           |
+rewrites        xrexpr, xarray-ts, GDAL, ...     |
      \______________________|____________________/
                             |
                       arrir-physical
@@ -140,16 +195,21 @@ not change the meaning of earlier ones.
 
 From #16, for positional semantics:
 
-- Dimensions are ordered. Order is part of the schema, and no operation in the current
-  vocabulary reorders it.
+- Dimensions are ordered. Order is part of the schema, and no operation reorders it
+  except as its documented output-order rule says. Name-based alignment is one such
+  rule: `a(x) + b(y, x)` gives `(x, y)` ([shapes.md](shapes.md)).
 - Positions are 0-based, and a negative position counts back from the end. Slices are
   half-open, with Python semantics. Adapters for hosts with other conventions translate
   them. R, for example, is 1-based and treats negative indices as exclusions.
-- A scalar indexer drops its dimension. Slices, position lists and masks never do. A host
-  whose indexing drops length-1 results (R's `drop = TRUE`) lowers those to scalar
-  indexers.
+- A scalar indexer drops its dimension. Slices, position lists and masks never do in
+  orthogonal mode; pointwise mode replaces the indexed axes with its indexers' broadcast
+  axes ([select.md](select.md)). A host whose indexing drops length-1 results (R's
+  `drop = TRUE`) lowers those to scalar indexers.
 - A positional mask must match the dimension length exactly. There is no recycling.
-- Label selections have unknown extent until they are resolved.
+- Label selections have unknown extent until they are resolved. In derived shapes that
+  unknown is a size symbol with an identity ([shapes.md](shapes.md)).
+- Broadcasting follows the 1 November decision [above](#decisions), detailed in
+  [shapes.md](shapes.md#broadcasting).
 
 ## What to extract
 
@@ -177,7 +237,7 @@ include `skipna`, `ddof`, `drop`, grouping boundaries, and window alignment.
 Do not replace this audit with an untyped `args`/`kwargs` JSON bag.
 
 Portable symbol IDs are strings with distinct Rust types for dimensions,
-variables and external bindings. They are not coordinate values. A host with
+variables, external bindings and grids. They are not coordinate values. A host with
 non-string names assigns collision-free symbols and retains its name mapping.
 An empty host name need not be rejected just because it is an empty string.
 
@@ -193,7 +253,8 @@ The first rewrites to port are xrexpr's four rules that act only on selections a
 rechunks: `merge_adjacent_selects`, `merge_adjacent_rechunks`, `pushdown_selects` and
 `pushdown_selects_past_rechunks`. Its four projection rules follow once projections
 exist. The fixpoint and its termination measure (no rule lengthens a plan or moves an
-operation rightwards) carry over with them.
+operation rightwards) carry over with them. For a graph the measure needs restating
+([dag.md](dag.md#rewrites-keep-old-ids-and-roots); deferred to #37).
 
 ## Implementation boundaries
 
@@ -214,20 +275,33 @@ do not omit a semantic field or its tests to satisfy the line count.
 2. A workspace with `arrir-types` and `arrir`. Distinct dimension, variable and
    external-binding IDs go in `arrir-types`, with serde tests and CI. The legacy
    scaffold moves to `arrir::legacy`.
-3. Logical schema in `arrir-types`: variable dimensions, coordinate roles, and
-   known/unknown sizes, with small invariant tests. #16's `ArraySchema` is the starting
-   point, widened to a dataset.
+3. Logical schema in `arrir-types` (proposed detail in
+   [schema-and-values.md](schema-and-values.md)): variable dimensions, coordinate roles, and
+   known/unknown sizes, with small invariant tests. It replaces #16's per-array
+   `ArraySchema` with a dataset-level schema. Then, in separate PRs: grids, CRS and
+   pixel interpretation, and staggered placements, as in [grids.md](grids.md).
 4. Positional indexer values, then label/advanced-index and binding values in
-   separate PRs. Preserve source distinctions used by rewrite proofs.
+   separate PRs. Preserve source distinctions used by rewrite proofs. Indexing modes
+   and computed indexers are decided in [select.md](select.md).
 5. A deliberately bounded reduction specification with explicit result options;
    reject anything outside that supported subset.
-6. Reduce and Select operation structs, each with its effects (purity rule 3), then the
-   linear plan starting with `Open`, and structural validation, split into
+6. Reduce and Select operation structs, each with its effects (purity rule 3; `Select`'s
+   effects on grids are in [grids.md](grids.md#select-on-a-grid)), then the
+   plan as a node arena ([dag.md](dag.md)), and structural validation, split into
    independently understandable PRs. Footprints, the other half of rule 3, come later
    but before any physical planning. Until an operation has one, it can't be physically
-   planned.
-7. Schema propagation along the chain, and unknown-fact handling.
-8. An xrexpr adapter for this subset, first with import/export round-trip tests.
+   planned. `Warp` follows in its own PR, as in [warp.md](warp.md).
+7. Schema propagation through the graph, and unknown-fact handling. After the graph in
+   step 6, in this order:
+   - symbolic shape inference: design #29 (`shapes.md`, #46), implementation #2;
+   - dtype inference and reduction accumulation: design #30 (`dtypes.md`, #47),
+     implementation #31;
+   - the first elementwise operations, `Add`, `Multiply` and `Greater`: design #32
+     ([elementwise.md](elementwise.md), decided), implementation #33, using both of the
+     above.
+8. An xrexpr adapter for this subset, first with import/export round-trip tests. Then a
+   GDAL adapter for `Open`, positional `Select` and `Warp`, tested against `gdal.Warp`
+   through `gdalxarray`, as in [gdal-adapter.md](gdal-adapter.md).
 9. One existing rewrite in `arrir-logical`, tested against xrexpr's rule and execution
    oracle.
 10. xarray-ts adapter/conformance fixtures for the same subset, then broaden
