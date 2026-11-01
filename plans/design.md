@@ -194,7 +194,7 @@ From #16, for positional semantics:
   indexers.
 - A positional mask must match the dimension length exactly. There is no recycling.
 - Label selections have unknown extent until they are resolved. In derived shapes that
-  unknown is a symbol with an identity (proposed in [shapes.md](shapes.md)).
+  unknown is a size symbol with an identity (proposed in [shapes.md](shapes.md)).
 - Broadcasting follows the 1 November decision [above](#decisions), detailed in
   [shapes.md](shapes.md#broadcasting).
 

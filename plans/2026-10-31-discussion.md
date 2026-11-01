@@ -43,13 +43,16 @@ Details in [dag.md](dag.md). All pending review.
 Details in [shapes.md](shapes.md). All pending review.
 
 - **Unknown extents get identities.** `Extent` gains `Symbolic`. Hosts still declare
-  `Unknown`; inference turns each one into a symbol, so `a + a` is provably compatible
-  without knowing `a`'s length.
-- **Broadcasting follows the Array API**, aligned from the last axis, and aligned axes
-  must share a `DimId`. Named broadcasting stays with #34.
+  `Unknown`; inference turns each one into a size symbol, so `a + a` is provably
+  compatible without knowing `a`'s length.
+- **Size symbols are identified by structure,** not by node, so the same slice of the
+  same extent is one size symbol and pushdown keeps its proofs.
+- **Broadcasting follows the Array API**, aligned from the last axis, with n operands
+  as a left fold. Whether the core also requires aligned axes to share a `DimId` is
+  left for review, with a recommendation. Named broadcasting stays with #34.
 - **Unresolved isn't an error.** A pair that can't be proven compatible records a
-  requirement that the host checks at bind time. Only a contradiction between known
-  extents fails at inference.
+  requirement. The core checks it when its facts arrive: at bind, at label resolution
+  or at execution. Rewrites must keep the requirement set unchanged.
 - **No Broadcast node and no constraint solver** for now.
 
 ## Not settled
