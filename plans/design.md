@@ -129,7 +129,7 @@ plan, but the table only describes what exists. A physical planner combines a lo
 plan with a storage layout to produce a physical plan.
 
 mdim-refs calls its placement layer "the plan". In ArrIR, *plan* always means the logical
-chain, and that layer is called *placements*.
+chain (a graph, if [dag.md](dag.md) is approved), and that layer is called *placements*.
 
 ### Dependency graph
 
@@ -226,7 +226,8 @@ The first rewrites to port are xrexpr's four rules that act only on selections a
 rechunks: `merge_adjacent_selects`, `merge_adjacent_rechunks`, `pushdown_selects` and
 `pushdown_selects_past_rechunks`. Its four projection rules follow once projections
 exist. The fixpoint and its termination measure (no rule lengthens a plan or moves an
-operation rightwards) carry over with them.
+operation rightwards) carry over with them. For a graph the measure needs restating
+(proposed in [dag.md](dag.md#rewrites-keep-old-ids-and-roots); deferred to #37).
 
 ## Implementation boundaries
 
@@ -262,7 +263,8 @@ do not omit a semantic field or its tests to satisfy the line count.
    independently understandable PRs. Footprints, the other half of rule 3, come later
    but before any physical planning. Until an operation has one, it can't be physically
    planned. `Warp` follows in its own PR, as in [warp.md](warp.md).
-7. Schema propagation along the chain, and unknown-fact handling.
+7. Schema propagation along the chain (through the graph, if dag.md is approved), and
+   unknown-fact handling.
 8. An xrexpr adapter for this subset, first with import/export round-trip tests. Then a
    GDAL adapter for `Open`, positional `Select` and `Warp`, tested against `gdal.Warp`
    through `gdalxarray`, as in [gdal-adapter.md](gdal-adapter.md).

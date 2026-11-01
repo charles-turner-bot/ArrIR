@@ -29,6 +29,9 @@ Details in [dag.md](dag.md). All pending review.
 - **The Rust arena is the plan.** Hosts lower into it through a builder rather than
   each keeping a validated node table of their own.
 - **One `Open` per binding, and no implicit merging** of equal nodes.
+- **`DimId` is plan-wide; `VarId` and `GridId` are per schema.** Neither #15 nor #26
+  set ID scope, and the review of #26 deferred it here. A shared dimension name asserts
+  one axis, not matching labels or extents.
 
 ## Not settled
 

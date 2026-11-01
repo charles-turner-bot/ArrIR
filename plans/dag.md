@@ -190,7 +190,12 @@ Neither #15 nor #26 says how far a `DimId`, `VarId` or `GridId` reaches. With on
   (`model.time`) was rejected: nodes after a `Project` or an `Add` have no single
   binding, and xarray results carry plain names.
 - **Rewrites never rename dimensions.** Because a `DimId` is shared, a rewrite that
-  moves a `Select { time }` below an `Add` applies it to both inputs.
+  moves a `Select { time }` below an `Add` must select on every input that has `time`.
+  The index for each input is derived from the broadcast mapping, not copied: a
+  size-one `time` axis isn't sliced like a full one. That legality proof is #37's.
+- **New dimensions join the plan's namespace.** A `Warp` target whose dimensions reuse
+  a name from elsewhere in the plan (`lat` and `lon` from another dataset, say) asserts
+  they're the same axes. Its target `GridId` is still compared by definition.
 
 Worked example, `obs.temp + model.temp`:
 
@@ -369,7 +374,9 @@ implementation is #28, after review.
 5. **One `Open` per binding.** Is this rule too strict for any known host lowering?
 6. **Dead nodes on the wire.** Allow them, or require compacted plans at every export?
 7. **Warp geometry.** Keep `GeometryBinding` as an operation field, or turn the target
-   geometry into an `Open` input so it can also be computed?
+   geometry into an `Open` input so it can also be computed? As a field, a binding
+   could be declared both by an `Open` and by a `GeometryBinding`, which rule 6 doesn't
+   yet cover. Making it an input removes that case.
 8. **ID scope.** Plan-wide `DimId`, with `VarId` and `GridId` scoped to one node's
    schema, and renaming at lowering for distinct axes that share a name? The
    alternative is per-`Open` scope for everything, with an explicit mapping operation
